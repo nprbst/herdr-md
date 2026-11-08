@@ -65,6 +65,10 @@ const plainNote = md => md.replace(/\*\*|__|[*_`]/g, "").replace(/\[([^\]]*)\]\(
 const dirname = p => p.slice(0, p.lastIndexOf("/")) || "/";
 const plain = tokens => (tokens ?? []).map(t => t.tokens ? plain(t.tokens) : t.text ?? t.raw ?? "").join("");
 const isComment = tok => tok.type === "html" && /^\s*(<!--[\s\S]*?-->\s*)+$/.test(tok.raw);
+// A cell's text for width estimates: like plain(), but a code span's spaces become
+// non-spaces, so the whole span counts as one word (it renders as an unbreakable chip).
+const solid = tokens => (tokens ?? []).map(t => t.type === "codespan" ? t.raw.replace(/^`+ ?| ?`+$/g, "").replace(/\s/g, "_")
+  : t.tokens ? solid(t.tokens) : t.text ?? t.raw ?? "").join("");
 const squash = s => s.replace(/\s+/g, " ").trim().toLowerCase();
 
 // Top-level blocks, with lists split into one block per item so a highlight or
@@ -556,7 +560,8 @@ export default class Md extends View {
         // here, so widths are estimated from a monospace advance (0.6em) and padded.
         const ch = SIZE.body * 0.62, padX = 24 + 6, cells = c => [tok.header[c], ...tok.rows.map(r => r[c])].map(x => plain(x?.tokens) || x?.text || "");
         const cols = tok.header.map((_h, c) => cells(c));
-        const min = cols.map(xs => padX + ch * Math.max(1, ...xs.flatMap(s => s.split(/\s+/).map(w => [...w].length))));
+        const words = tok.header.map((_h, c) => [tok.header[c], ...tok.rows.map(r => r[c])].map(x => solid(x?.tokens) || x?.text || ""));
+        const min = words.map(xs => padX + ch * Math.max(1, ...xs.flatMap(s => s.split(/\s+/).map(w => [...w].length))));
         const max = cols.map((xs, c) => Math.max(min[c], padX + ch * Math.max(...xs.map(s => [...s.trim()].length))));
         const avail = this.colW - 2, sum = a => a.reduce((x, y) => x + y, 0);
         let weight;
