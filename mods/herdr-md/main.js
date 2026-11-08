@@ -164,7 +164,10 @@ export default class Md extends View {
       while (gen === this.watchGen) {
         const changed = await watchFolder(dir);
         if (gen !== this.watchGen) return;   // navigated to another file
-        if (changed.some(p => p === this.file || p === dir)) this.load(cx);
+        // Match by name: the watcher reports resolved paths (/private/tmp/… for
+        // /tmp/…, or a symlinked folder's target), which needn't equal this.file.
+        const base = this.file.slice(dir.length);
+        if (changed.some(p => p === this.file || p.endsWith(dir) || p.endsWith(base))) this.load(cx);
       }
     });
   }
