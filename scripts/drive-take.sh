@@ -13,9 +13,8 @@
 # while someone else is typing. Beat start times land in $TAKE/beats.tsv for
 # placing captions in the edit.
 #
-# [NEED: rehearsal] theGrid key names are unverified here: shifted letters and
-# symbols (V G { } ] ?) go through `input type`, named keys (escape, enter,
-# backspace, ctrl+d) through `input key`. Check each on the first rehearsal.
+# Rehearsed 2026-11-08: every key goes through `input key` (shift chords for
+# V G { } ?); focus_viewer clicks the viewer's status bar to take the keyboard.
 set -eu
 here=$(cd "$(dirname "$0")/.." && pwd)
 TAKE=${TAKE:-/tmp/herdr-md-take}
@@ -38,8 +37,11 @@ if [ $DRY = 0 ]; then
   [ -f "$TAKE/viewer.pane" ] || { echo "drive-take: run scripts/take-setup.sh first" >&2; exit 1; }
   PANE=$(cat "$TAKE/viewer.pane")
   WIN=$(thegrid window find --app Herdr --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["windowId"])')
+  # Click target: the viewer's status bar, empty middle (viewer is the middle
+  # column of the take layout; fractions of the Herdr window frame).
+  read -r CX CY < <(thegrid window find --app Herdr --json | python3 -c 'import json,sys; f=json.load(sys.stdin)["matches"][0]["frame"]; print(int(f["x"]+f["width"]*0.505), int(f["y"]+f["height"]*0.945))')
 else
-  PANE=PANE WIN=WIN
+  PANE=PANE WIN=WIN CX=X CY=Y
 fi
 T0=$(python3 -c 'import time; print(time.time())')
 SIM=0   # dry run: simulated clock, the sum of the pauses (key presses not counted)
@@ -61,21 +63,34 @@ beat() {
   printf '[%6ss] %-10s %s\n' "$t" "$1" "$2"
 }
 
-# Keys go to the viewer: focus its pane, then press. Single characters are typed
-# literally (so V is a capital V); longer names are keys or chords.
-focus_viewer() { run herdr-app do pane.focus "{\"pane\":\"$PANE\"}"; pause 0.15; }
+# Keys go to the viewer: focus its pane, then click its status bar (pane.focus
+# alone leaves the keyboard elsewhere), then press. Everything goes through
+# `input key`: the viewer ignores `input type` text. Capitals and shifted
+# symbols become shift chords (V is shift+v, } is shift+]).
+focus_viewer() {
+  run herdr-app do pane.focus "{\"pane\":\"$PANE\"}"; pause 0.15
+  run thegrid input click "$CX" "$CY"; pause 0.6   # keys sooner than this get lost
+}
+keyname() {
+  case $1 in
+    [[:upper:]]) printf 'shift+%s' "$(printf %s "$1" | tr A-Z a-z)" ;;
+    '{') printf 'shift+[' ;; '}') printf 'shift+]' ;; '?') printf 'shift+/' ;;
+    *) printf %s "$1" ;;
+  esac
+}
 k() {
   for x in "$@"; do
-    if [ ${#x} -eq 1 ]; then run thegrid input type "$x" --window "$WIN"
-    else run thegrid input key "$x" --window "$WIN"; fi
+    run thegrid input key "$(keyname "$x")" --window "$WIN"
     pause 0.3
   done
 }
+# Type a word into the search prompt, one key per letter.
+word() { local i; for ((i = 0; i < ${#1}; i++)); do run thegrid input key "${1:i:1}" --window "$WIN"; done; }
 
 # An agent-side command: visible in the --shell terminal, or run here.
 agent() {
   if [ -n "$SHELL_T" ]; then run hc send "$SHELL_T" "$*"
-  else run sh -c "$*"; fi
+  else run sh -c "$*" || true; fi
 }
 
 if [ $DRY = 0 ]; then
@@ -97,7 +112,7 @@ if [ $CUT = master ]; then
   beat keys   "Vim keys. Smooth scrolling."
   k j j j; pause 0.4; k ctrl+d; pause 1.2; k ctrl+u; pause 1
   beat outline "Outline. Jump anywhere."
-  k o; pause 1.2; k j j j; pause 0.6; k enter; pause 1.6        # o: Writing math is the 4th entry
+  k o; pause 1.2; k j j; pause 0.9; k enter; pause 1.6          # o opens on the current section (Reading): j j is Writing math
   beat math   "Real math, typeset."
   pause 3
   beat mermaid "Mermaid, in your theme."
@@ -105,8 +120,8 @@ if [ $CUT = master ]; then
   beat fold   "Fold any section."
   k z a; pause 1.4; k z a; pause 1.4
   beat search "Search as you read."
-  k /; pause 0.3; run thegrid input type "theme" --window "$WIN"; pause 0.6
-  k enter; pause 1.2; k n; pause 1.2; k escape; pause 0.4
+  k /; pause 0.3; word theme
+  pause 0.6; k enter; pause 1.8; k escape; pause 0.4      # typing lands on the Note; Enter steps on (n would be typed)
   beat links  "Links open in place."
   k G; pause 0.9; k enter; pause 1.6; k backspace; pause 1.4
   beat change "The file changes. See what."
