@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""mdh: drive the Herdr md viewer from a shell (built for Claude).
+
+  mdh open FILE [--down]                       open FILE in a viewer pane beside the focused pane
+  mdh hl FILE --lines 40-52 [--note TEXT]      highlight source lines (replaces existing highlights)
+  mdh hl FILE --text "a quote" [--note TEXT]   highlight the block containing a quote
+        [--color yellow|green|red|blue|purple|cyan] [--add]  (--add keeps earlier highlights)
+  mdh focus FILE N                              scroll to highlight N (1-based)
+  mdh clear FILE                                remove all highlights
+  mdh show FILE                                 print current highlights
+  mdh sel                                       print what the person last sent from the viewer
+                                                (V to select, Enter to send): file, lines, text
+
+The viewer watches ~/.cache/herdr-md/ and redraws and scrolls when a file there changes.
+Viewer keys: j/k move the cursor, V visual select, y copy, Enter send to Claude, za fold,
+/ search, n/N next match or highlight, # line numbers.
+"""
+import argparse, json, os, re, subprocess, sys, time
+
+DIR = os.path.expanduser("~/.cache/herdr-md")
+
+
+def key(path):
+    return os.path.join(DIR, re.sub(r"[^a-zA-Z0-9]+", "_", path) + ".json")
+
+
+def load(path):
+    try:
+        with open(key(path)) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {"highlights": []}
+
+
+def save(path, state, focus=None):
+    os.makedirs(DIR, exist_ok=True)
+    state["seq"] = time.time_ns()
+    state["focus"] = focus
+    tmp = key(path) + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(state, f, indent=1)
+    os.replace(tmp, key(path))
+
+
+def main():
+    p = argparse.ArgumentParser(prog="mdh", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    o = sub.add_parser("open"); o.add_argument("file"); o.add_argument("--down", action="store_true")
+    h = sub.add_parser("hl"); h.add_argument("file")
+    h.add_argument("--lines"); h.add_argument("--text"); h.add_argument("--note")
+    h.add_argument("--color", default="yellow"); h.add_argument("--add", action="store_true")
+    f = sub.add_parser("focus"); f.add_argument("file"); f.add_argument("n", type=int)
+    c = sub.add_parser("clear"); c.add_argument("file")
+    s = sub.add_parser("show"); s.add_argument("file")
+    sub.add_parser("sel")
+    a = p.parse_args()
+    if a.cmd == "sel":
+        try:
+            with open(os.path.join(DIR, "selection.json")) as f:
+                print(json.dumps(json.load(f), indent=1))
+        except OSError:
+            sys.exit("mdh: nothing selected (in the viewer: V, move, Enter)")
+        return
+    path = os.path.abspath(os.path.expanduser(a.file))
+
+    if a.cmd == "open":
+        if not os.path.isfile(path):
+            sys.exit(f"mdh: no such file: {path}")
+        args = {"direction": "down" if a.down else "right", "mod": "herdr-md", "props": {"file": path}}
+        r = subprocess.run(["herdr-app", "do", "pane.split", json.dumps(args)], capture_output=True, text=True)
+        sys.stdout.write(r.stdout); sys.stderr.write(r.stderr); sys.exit(r.returncode)
+
+    state = load(path)
+    if a.cmd == "hl":
+        if not (a.lines or a.text):
+            sys.exit("mdh: hl needs --lines A-B or --text QUOTE")
+        mark = {"color": a.color}
+        if a.lines:
+            nums = [int(x) for x in a.lines.split("-")]
+            mark["lines"] = [nums[0], nums[-1]]
+        else:
+            mark["text"] = a.text
+        if a.note:
+            mark["note"] = a.note
+        marks = state.get("highlights", []) if a.add else []
+        marks.append(mark)
+        save(path, {"highlights": marks}, focus=len(marks) - 1)
+        print(f"highlight {len(marks)} of {len(marks)} on {path}")
+    elif a.cmd == "focus":
+        save(path, state, focus=a.n - 1)
+    elif a.cmd == "clear":
+        save(path, {"highlights": []})
+    elif a.cmd == "show":
+        print(json.dumps(state.get("highlights", []), indent=1))
+
+
+if __name__ == "__main__":
+    main()
