@@ -533,9 +533,28 @@ export default class Md extends View {
       case "hr":
         return div().my(16).h(1).bg(t.border);
       case "table": {
-        // Column weights from content length, so a short label column stays narrow.
-        const len = tok.header.map((h, c) => Math.max(4, h.text.length, ...tok.rows.map(r => r[c]?.text.length ?? 0)));
-        const weight = len.map(n => Math.min(n, 60));
+        // Auto layout, like a browser's: every column gets at least its longest
+        // word (min) and shares the rest by content length (max). If even the
+        // mins don't fit, only the widest columns give way. No text measuring
+        // here, so widths are estimated from a monospace advance (0.6em) and padded.
+        const ch = SIZE.body * 0.62, padX = 24 + 6, cells = c => [tok.header[c], ...tok.rows.map(r => r[c])].map(x => plain(x?.tokens) || x?.text || "");
+        const cols = tok.header.map((_h, c) => cells(c));
+        const min = cols.map(xs => padX + ch * Math.max(1, ...xs.flatMap(s => s.split(/\s+/).map(w => [...w].length))));
+        const max = cols.map((xs, c) => Math.max(min[c], padX + ch * Math.max(...xs.map(s => [...s.trim()].length))));
+        const avail = this.colW - 2, sum = a => a.reduce((x, y) => x + y, 0);
+        let weight;
+        if (sum(max) <= avail) weight = max;
+        else if (sum(min) <= avail) weight = min.map((m, c) => m + (max[c] - m) * (avail - sum(min)) / (sum(max) - sum(min)));
+        else {
+          // Cap the widest columns at the level where the total just fits.
+          const sorted = [...min].sort((a, b) => a - b);
+          let cap = avail / min.length;
+          for (let k = 0, rest = avail; k < sorted.length; k++) {
+            if (sorted[k] * (sorted.length - k) > rest) { cap = rest / (sorted.length - k); break; }
+            rest -= sorted[k];
+          }
+          weight = min.map(m => Math.min(m, cap));
+        }
         const cell = (c, j, key) => div().w(0).flex_grow(weight[j]).min_w(0).px(12).py(7)
           .when(tok.align[j] === "right", el => el.text_right()).when(tok.align[j] === "center", el => el.text_center())
           .child(this.inline(key, c.text));
