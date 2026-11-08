@@ -13,7 +13,7 @@
 
 The viewer watches ~/.cache/herdr-md/ and redraws and scrolls when a file there changes.
 Viewer keys: j/k move the cursor, V visual select, y copy, p pin for Claude, Enter fold/follow, za fold,
-/ search, n/N next match or highlight, # line numbers.
+/ search, n/N next match or highlight, # line numbers, ? key help, q close.
 """
 import argparse, json, os, re, subprocess, sys, time
 

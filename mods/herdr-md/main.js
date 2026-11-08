@@ -9,7 +9,7 @@
 // them and scrolls to `focus` whenever `seq` changes.
 import { View, div, image } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, TextView, InputState, Input } from "gpui-base";
-import { props, readTextFile, watchFolder, exec, theme, settings, home, nextCommand, panes } from "herdr";
+import { props, readTextFile, watchFolder, exec, theme, settings, home, nextCommand, panes, run } from "herdr";
 import { marked } from "./marked.js";
 import { inlineMath } from "./tex.js";
 import { hash as bhash, diffBlocks, slug, labelOf, inlineRoles, alertOf, ALERTS } from "./doc.js";
@@ -37,6 +37,19 @@ const MAX_W = 960, PAD = 64, TOP = 28;
 // a long glide for jumps (highlights, search, headings, gg/G), short for j/k and the wheel.
 // A new agent note waits for the glide, fades in, then types itself out.
 const GLIDE = 560, STEP = 140, NUDGE = 60;
+// The help overlay's list, in the order of the key handler (keys()).
+// Two columns of sections.
+const HELP = [[
+  ["MOVE", [["j k", "next / previous block (5j)"], ["gg G", "top / bottom"], ["{ }", "previous / next heading"],
+    ["ctrl-d ctrl-u", "half page down / up"], ["ctrl-f ctrl-b", "page down / up"], ["space", "page down"], ["ctrl-e ctrl-y", "scroll a line, cursor stays"], ["zz", "center the cursor"]]],
+  ["SHARE", [["V", "select blocks"], ["y", "copy the markdown source"], ["p", "pin the selection for Claude"], ["Esc", "unselect, close search, unpin"]]],
+], [
+  ["READ", [["o", "outline"], ["Enter", "fold a heading or follow a link"], ["Backspace", "back after a link"],
+    ["za zc zo", "toggle / close / open fold"], ["zM zR", "fold / unfold all"], ["] [", "next / previous change"], ["c", "clear change marks"],
+    ["/", "search"], ["n N", "next / previous match or note"], ["#", "line numbers"]]],
+  ["VIEWER", [["? h", "this help"], ["q", "close the viewer"]]],
+]];
+const MODIFIER_KEYS = ["shift", "control", "alt", "platform", "function", "capslock"];
 // The app only loads images from its own folder, so local images are copied
 // here first. Hidden folder: saving into it doesn't hot-reload the mod.
 const CACHE = `mods/${MOD}/.cache`;
@@ -82,6 +95,7 @@ export default class Md extends View {
     this.folded = new Set(); this.hidden = [];
     this.labels = new Map(); this.anchors = new Map(); this.changed = new Set(); this.removed = new Map(); this.lastHashes = null;
     this.history = []; this.pendingAnchor = null; this.restore = null; this.outline = false; this.oi = 0; this.watchGen = 0;
+    this.help = false; this.helpIn = 0;
     this.query = ""; this.matches = []; this.mi = 0; this.searching = false; this.typing = false;
     // Vim-ish cursor: one rendered block is one "line". anchor !== null means visual mode.
     this.cursor = 0; this.anchor = null; this.pending = ""; this.count = ""; this.numbers = true; this.picked = null; this.src = "";
@@ -645,6 +659,34 @@ export default class Md extends View {
       }));
   }
 
+  // ---- key help (? or h) ----
+  // Fades and drifts in; any key fades it out, then it unmounts.
+  openHelp(cx) {
+    this.help = true; this.helpIn = 0; cx.notify();
+    cx.timer.after(16, cx => { this.helpIn = 1; cx.notify(); });
+  }
+
+  closeHelp(cx) {
+    this.helpIn = 0; cx.notify();
+    cx.timer.after(180, cx => { if (!this.helpIn) { this.help = false; cx.notify(); } });
+  }
+
+  helpPanel(t) {
+    const key = k => div().px(6).rounded(4).bg(t.surface).border_1().border_color(t.border).text_color(t.foreground).child(k);
+    const w = Math.min(720, Math.max(280, this.colW + PAD * 2 - 40));
+    return h_flex().id("md-help-wrap").absolute().left(0).w_full().justify_center().top(this.helpIn ? 18 : 30)
+      .opacity(this.helpIn).transition("opacity", { duration: 180, easing: "ease-out" }).transition("top", { duration: 220, easing: "ease-out" })
+      .child(v_flex().id("md-help").w(w).max_h(Math.max(160, this.viewH - 36)).overflow_y_scrollbar()
+        .py(10).rounded(10).bg(t.popover).border_1().border_color(t.input).shadow_md().text_size(13).font_family(BODY())
+        .child(div().px(16).pb(8).text_size(11).text_color(t.dim).child("KEYS · any key closes"))
+        .child(h_flex().flex_wrap().items_start().children(HELP.map(col => v_flex().flex_1().min_w(320)
+          .children(col.map(([section, rows]) => v_flex().px(16).pb(8)
+            .child(div().pb(2).text_size(11).font_semibold().text_color(t.accent).child(section))
+            .children(rows.map(([keys, what]) => h_flex().gap(10).items_center().py(1)
+              .child(h_flex().w(118).flex_none().gap(4).text_size(12).children(keys.split(" ").map(key)))
+              .child(div().flex_1().min_w(0).text_color(t.muted).child(what))))))))));
+  }
+
   // ---- cursor ----
   yOf(i) { let y = TOP; for (let j = 0; j < i; j++) if (!this.hidden[j]) y += this.heights[j] ?? 0; return y; }
 
@@ -703,6 +745,7 @@ export default class Md extends View {
     }
     const mod = e.modifiers ?? {};
     if (mod.platform || mod.alt) return;
+    if (this.help) { if (!MODIFIER_KEYS.includes(e.key)) this.closeHelp(cx); return cx.stop_propagation(); }
     const k = mod.shift && e.key.length === 1 ? (e.key_char ?? e.key.toUpperCase()) : e.key;
     const half = Math.max(80, this.viewH / 2), page = Math.max(100, this.viewH - 80);
     if (this.outline) {
@@ -765,6 +808,8 @@ export default class Md extends View {
         return cx.notify();
       case "#": this.numbers = !this.numbers; return cx.notify();
       case "/": return this.openSearch(cx);
+      case "?": case "h": return this.openHelp(cx);
+      case "q": { const me = panes().find(p => p.focused && p.mod === MOD); if (me) run("pane.close", { pane: me.pane }); return; }
       case "n": case "N": {
         if (this.matches.length) { this.step(k === "n" ? 1 : -1); this.cursor = this.matches[this.mi]; return cx.notify(); }
         const c = this.notes.highlights.length; if (!c) return;
@@ -800,6 +845,7 @@ export default class Md extends View {
               .when(this.removed.has(this.blocks.length), el => el.child(this.removedMark(this.removed.get(this.blocks.length), t))))))
         .when(thumbH > 0, el => el.child(div().absolute().right(3).w(6).rounded(3).bg(t.border).top(thumbY).h(thumbH).transition("top", { duration: this.motion, easing: "ease-out" })))
         .when(this.outline, el => el.child(this.outlinePanel(t)))
+        .when(this.help, el => el.child(this.helpPanel(t)))
         .when(this.searching, el => el.child(h_flex().absolute().top(10).right(20).w(340).h(38).px(10).gap(8).items_center()
           .rounded(10).bg(t.popover).border_1().border_color(this.typing ? t.accent : t.input).shadow_md()
           .child(div().text_color(t.dim).text_size(14).child("⌕"))
