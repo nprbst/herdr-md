@@ -136,7 +136,10 @@ export default class Md extends View {
           this.codes.forEach(c => c.release?.()); this.codes = [];
           const tokens = marked.lexer(text); this.src = text;
           this.prepare(tokens);
-          this.blocks = this.index(blocks(text, tokens)); this.heights = []; this.error = null;
+          // Keep measured heights: a reloaded block whose size didn't change never
+          // reports again (on_size_change fires on new or changed sizes only), and
+          // reaim() waits for every height above its target.
+          this.blocks = this.index(blocks(text, tokens)); this.heights.length = Math.min(this.heights.length, this.blocks.length); this.error = null;
           this.blocks.forEach(b => { b.find = squash(b.type === "heading" ? plain(b.tokens) : b.raw.replace(/[*_`#>|~]+/g, " ")); });
           if ([...this.folded].some(i => this.blocks[i]?.type !== "heading")) this.folded.clear();
           this.refold(); this.search(this.query);
