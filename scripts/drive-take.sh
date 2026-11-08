@@ -7,7 +7,14 @@
 #
 #   --cut      master (60s, default) or short (~24s)
 #   --shell T  paste the mdh commands into herdr-core terminal T (`hc ls`) so
-#              they show on screen; without it they run here, off camera
+#              they show on screen; without it they run here, off camera.
+#              The shell must sit in $TAKE: it is shown relative paths. Use a
+#              physical TAKE (/private/tmp/..., not /tmp/...): mdh resolves
+#              relative paths against the physical cwd.
+#   CLICK_FX   env: the viewer status bar's x as a fraction of the Herdr
+#              window (default 0.505, viewer in the middle column)
+#   PARK       env: "X Y" screen point to park the pointer after each click,
+#              outside the frame you crop (the recorder draws the pointer)
 #
 # This script presses keys in the Herdr window (theGrid `input`). Don't run it
 # while someone else is typing. Beat start times land in $TAKE/beats.tsv for
@@ -26,7 +33,7 @@ while [ $# -gt 0 ]; do
     --cut) CUT=$2; shift ;;
     --shell) SHELL_T=$2; shift ;;
     --countdown) COUNTDOWN=$2; shift ;;
-    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
     *) echo "drive-take: unknown option $1" >&2; exit 2 ;;
   esac
   shift
@@ -39,10 +46,12 @@ if [ $DRY = 0 ]; then
   WIN=$(thegrid window find --app Herdr --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["windowId"])')
   # Click target: the viewer's status bar, empty middle (viewer is the middle
   # column of the take layout; fractions of the Herdr window frame).
-  read -r CX CY < <(thegrid window find --app Herdr --json | python3 -c 'import json,sys; f=json.load(sys.stdin)["matches"][0]["frame"]; print(int(f["x"]+f["width"]*0.505), int(f["y"]+f["height"]*0.945))')
+  read -r CX CY < <(thegrid window find --app Herdr --json | FX=${CLICK_FX:-0.505} python3 -c 'import json,os,sys; f=json.load(sys.stdin)["matches"][0]["frame"]; print(int(f["x"]+f["width"]*float(os.environ["FX"])), int(f["y"]+f["height"]*0.945))')
 else
   PANE=PANE WIN=WIN CX=X CY=Y
 fi
+# Paths as typed: relative in the visible shell (it sits in $TAKE), absolute here.
+if [ -n "$SHELL_T" ]; then SF=demo/tour.md SA=after.md; else SF=$F SA=$TAKE/after.md; fi
 T0=$(python3 -c 'import time; print(time.time())')
 SIM=0   # dry run: simulated clock, the sum of the pauses (key presses not counted)
 
@@ -69,7 +78,9 @@ beat() {
 # symbols become shift chords (V is shift+v, } is shift+]).
 focus_viewer() {
   run herdr-app do pane.focus "{\"pane\":\"$PANE\"}"; pause 0.15
-  run thegrid input click "$CX" "$CY"; pause 0.6   # keys sooner than this get lost
+  run thegrid input click "$CX" "$CY"
+  [ -n "${PARK:-}" ] && run thegrid input move $PARK
+  pause 0.6   # keys sooner than this get lost
 }
 keyname() {
   case $1 in
@@ -125,11 +136,11 @@ if [ $CUT = master ]; then
   beat links  "Links open in place."
   k G; pause 0.9; k enter; pause 1.6; k backspace; pause 1.4
   beat change "The file changes. See what."
-  agent "cp '$TAKE/after.md' '$F'"; pause 3                      # glide, three marks, "3 changed"
+  agent "cp $SA $SF"; pause 3                      # glide, three marks, "3 changed"
   beat step   "Jump change to change."
   k ']'; pause 1.2; k ']'; pause 1.4
   beat bonus  "Bonus: your agent points."
-  agent "mdh hl '$F' --text 'Select a few blocks' --note 'Pin the lines you mean, and I read exactly those.'"
+  agent "mdh hl $SF --text 'Select a few blocks' --note 'Pin the lines you mean, and I read exactly those.'"
   pause 4
   beat pin    "You point back."
   focus_viewer; k n V p; pause 1.6                              # n: cursor onto the highlight (one block)
@@ -145,9 +156,9 @@ else
   beat mermaid "Mermaid, in your theme."
   k '}'; pause 2.7
   beat change "See exactly what changed."
-  agent "cp '$TAKE/after.md' '$F'"; pause 2.4; k ']'; pause 1.4
+  agent "cp $SA $SF"; pause 2.4; k ']'; pause 1.4
   beat bonus  "Bonus: your agent points."
-  agent "mdh hl '$F' --text 'Select a few blocks' --note 'Pin the lines you mean, and I read exactly those.'"
+  agent "mdh hl $SF --text 'Select a few blocks' --note 'Pin the lines you mean, and I read exactly those.'"
   pause 4.6
   beat cta    "add the mod github.com/ryanthedev/herdr-md"
   pause 4
