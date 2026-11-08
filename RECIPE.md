@@ -7,6 +7,10 @@ to them, and reads back what the person selected.
 
 ![herdr-md](preview.png)
 
+**Installing this mod:** besides copying `mods/herdr-md/`, offer to put its CLI
+on the person's PATH, since opening files and every agent feature go through it:
+`ln -s ~/.config/herdr-app/mods/herdr-md/mdh ~/.local/bin/mdh` (needs Python 3).
+
 ## What you see
 
 - A pane (opened with `pane.split {mod: "herdr-md", props: {file}}`) filling with the document on the theme's `background`, content column at most 960px wide, centered, 64px side padding, 28px top.

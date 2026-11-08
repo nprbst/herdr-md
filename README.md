@@ -1,32 +1,26 @@
 # herdr-md
 
-A native markdown viewer pane for the [Herdr](https://herdr.dev) desktop app,
-built so a coding agent can point at things in it while you read.
+Finally, markdown and the terminal done right: a native markdown pane for the
+[Herdr](https://herdr.dev) desktop app, drawn in your theme next to your shell.
 
-![herdr-md](preview.png)
+![herdr-md: a README rendered in a Herdr pane](preview.png)
 
-- **Rendered, not a terminal.** Real heading sizes and colors from your Herdr
-  theme, your terminal font for body text, tables, task lists, images, and
-  code blocks with syntax highlighting and a copy button.
-- **Math and diagrams.** `$$…$$` display math is typeset by MathJax; inline
-  `$…$` becomes Unicode (`ŷ = wᵀx + b`). ` ```mermaid ` fences render as
-  diagrams in your theme's colors.
-- **Agents can highlight.** `mdh hl FILE --lines 40-52 --note "…"` tints those
-  lines, puts a note under them and glides the view there. Several highlights
-  number themselves; `n`/`N` steps through them.
-- **You can point back.** Select blocks with `V`, press `p` to pin them, and
-  `mdh sel` gives the agent the file, lines and text you meant.
-- **Vim-ish keys.** A block cursor with line numbers, visual selection,
-  folding, search, and smooth animated scrolling.
-- **See what the agent changed.** When the file changes on disk the view
-  glides to the first new or edited block and marks every one in the gutter,
-  even across sessions ("3 changed since you last looked"). `]` / `[` step
-  through them, `c` clears.
-- **Links, outline, callouts.** Relative `.md` links open in place
-  (`Backspace` goes back), `#heading` links glide, `o` pops up an outline.
-  GitHub `> [!NOTE]` / `[!TIP]` / `[!WARNING]` callouts render as cards, and
-  d2l-book roles (`:eqlabel:`, `:eqref:`, `:numref:`) become numbered
-  equations and working cross-references.
+- **Reads like a real document.** Heading sizes and colors from your Herdr
+  theme, your terminal font, tables, task lists, `> [!NOTE]` callouts, and code
+  blocks with syntax colors and a copy button.
+- **Math and diagrams in place.** MathJax typesets `$$…$$`, inline `$…$`
+  becomes Unicode (`ŷ = wᵀx + b`), ` ```mermaid ` fences render in your
+  theme's colors, and d2l-book `:eqref:` / `:numref:` roles become working
+  cross-references.
+- **Moves like vim.** A block cursor with counts (`5j`), smooth glide
+  scrolling, folding (`za`), an outline (`o`), search (`/`), and `.md` links
+  that open in place with `Backspace` to go back.
+- **Shows what changed.** Save the file and the pane glides to the first
+  edited block and marks each one in the gutter, even across sessions ("3
+  changed since you last looked"). `]` / `[` step through them.
+- **Bonus: works with AI.** Your agent runs `mdh hl FILE --lines 40-52 --note
+  "…"` to highlight and annotate; you pin blocks with `V` then `p`, and `mdh
+  sel` hands it the lines you meant.
 
 ## Install
 
@@ -34,7 +28,13 @@ Ask your agent in Herdr:
 
 > add the mod github.com/ryanthedev/herdr-md
 
-or by hand:
+then put the CLI on your PATH:
+
+```sh
+ln -s ~/.config/herdr-app/mods/herdr-md/mdh ~/.local/bin/mdh
+```
+
+Or by hand:
 
 ```sh
 git clone https://github.com/ryanthedev/herdr-md
