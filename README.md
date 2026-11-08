@@ -14,7 +14,7 @@ built so a coding agent can point at things in it while you read.
 - **Agents can highlight.** `mdh hl FILE --lines 40-52 --note "…"` tints those
   lines, puts a note under them and glides the view there. Several highlights
   number themselves; `n`/`N` steps through them.
-- **You can point back.** Select blocks with `V`, press `Enter`, and
+- **You can point back.** Select blocks with `V`, press `p` to pin them, and
   `mdh sel` gives the agent the file, lines and text you meant.
 - **Vim-ish keys.** A block cursor with line numbers, visual selection,
   folding, search, and smooth animated scrolling.
