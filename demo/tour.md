@@ -1,7 +1,7 @@
 # A tour of herdr-md
 
-A markdown pane for the Herdr desktop app that your coding agent can **point
-at**. Open this file with `mdh open demo/tour.md` and press `o` for the outline.
+Markdown rendered in a Herdr pane, read with vim keys. Open this file with
+`mdh open demo/tour.md`, then press `o` for the outline or `?` for every key.
 
 > [!NOTE]
 > Everything here is drawn natively: real font sizes, your theme's colors,
@@ -19,12 +19,21 @@ tables all render the way you'd expect.
 | Key | Does |
 |---|---|
 | `j` / `k` | move the block cursor |
-| `V`, `y`, `p` | select, copy, pin for the agent |
-| `]` / `[` | jump between changed blocks |
+| `{` / `}` | previous / next heading |
+| `za` | fold a section |
 | `o` | outline |
 
 > [!TIP]
 > Click any heading to fold its section, or press `za`.
+
+## Code
+
+Code blocks take your theme's syntax colors and get a copy button.
+
+```python
+def loss(w, b, xs, ys):
+    return sum((w * x + b - y) ** 2 for x, y in zip(xs, ys)) / (2 * len(xs))
+```
 
 ## Writing math
 
@@ -40,8 +49,8 @@ Minimizing :eqref:`eq_loss` gives the best line through the data.
 
 ```mermaid
 flowchart LR
-  A[Agent edits a doc] --> B{herdr-md}
-  B -->|diff| C[Changed blocks glow]
+  A[Edit a doc] --> B{herdr-md}
+  B -->|diff| C[Changed blocks marked]
   B -->|mdh hl| D[Highlight + note]
   C --> E[You read only what changed]
   D --> E
@@ -53,7 +62,7 @@ Select a few blocks with `V` and `j`, press `p` to pin them, then ask your agent
 "what about this?" It runs `mdh sel` and sees exactly what you meant:
 the file, the line range and the markdown source.
 
-And when the agent rewrites part of a doc, the blocks it touched light up in
+And when the agent rewrites part of a doc, the blocks it touched get a mark in
 the gutter, so you only reread what changed.
 
 ## Links
