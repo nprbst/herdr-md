@@ -38,6 +38,8 @@ Keep competitor comparisons and star counts out of the copy; let the demo make t
 - **The edited snapshot** changes exactly three task-list items: "Render markdown natively" → "Read markdown in Herdr"; "Let the agent highlight passages" → "Follow agent highlights"; "[ ] Take over the world" → "[x] Review only changed blocks". Rehearsed 2026-11-08: "3 changed", three gutter marks, and the view glides there even right after a highlight.
 - **Post:** ffmpeg for assembly, keyframed crop/zoom-ins on the active region (the driver logs timestamps and window bounds), lower-third captions per beat, speed ramps only on idle stretches. `/brag` (Hyperframes) for the title and end cards only. Remotion is unnecessary.
 
+- **As recorded (2026-11-08):** the Herdr window here is a 3820x1060pt ultrawide tile, not 1600x900, so the take runs in a Herdr space `demo` laid out shell | viewer | blank filler pane, dividers dragged until shell + viewer fill a 16:9 region, and the edit crops the filler and the Fleet sidebar away. theGrid records the window (`target=window`, mov, 60fps, `cursor=false`; it arrives as 4096x1136 VFR, post forces 60fps). Driver: `TAKE=/private/tmp/herdr-md-take CLICK_FX=0.32 PARK="X Y" scripts/drive-take.sh --shell T` (a physical TAKE path: `mdh` resolves relative paths against the physical cwd; PARK moves the pointer out of frame because the recorder draws it). Working files, post scripts and re-run steps: `~/Movies/herdr-md-launch/README.md`.
+
 ### Storyboard (master, 60s)
 
 Captions are muted-first: 6 words or fewer, one per beat. No shot runs over 5s
