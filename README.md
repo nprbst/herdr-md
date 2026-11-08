@@ -76,6 +76,31 @@ mdh open README.md                  # a viewer to the right of the focused pane
 
 or from any script: `herdr-app do pane.split '{"direction":"right","mod":"herdr-md","props":{"file":"/abs/path.md"}}'`.
 
+### Or start in the picker
+
+```sh
+mdh pick                            # no viewer open: an empty one beside the focused pane, in the picker
+```
+
+It lists this shell's folder, or its whole git repo when the folder is inside
+one. With a viewer already open it opens that viewer's picker instead. Esc
+leaves an empty viewer that says `Find a markdown file · ctrl-p`; `q` closes it.
+
+To do the same from anywhere in Herdr with `cmd-shift-o`, add this to the
+`global` section of `~/.config/herdr-app/keys.json` (it reloads live):
+
+```json
+"cmd-shift-o": {
+  "command": "pane.split",
+  "args": { "direction": "right", "mod": "herdr-md", "props": { "pick": true } }
+}
+```
+
+The key can't use `herdr-md.pick`: a mod command only reaches a viewer that
+is already showing, so with none open it does nothing. With no shell to ask,
+the picker lists the focused terminal's folder (or its repo), else the folder
+of the file you opened last, else your home folder.
+
 ### Click to open from the Files panel
 
 Herdr's Files panel is a shipped mod, so change a copy of it:
@@ -107,7 +132,7 @@ mdh hl FILE --text "a phrase from the doc" --color green  # matches the block co
 mdh hl FILE --lines 90 --add --color red                  # --add keeps the earlier ones
 mdh focus FILE 2 · mdh clear FILE · mdh show FILE
 mdh sel                                                   # what the person pinned with V … p
-mdh pick                                                  # open the file picker in the focused (or only) viewer
+mdh pick                                                  # the picker in the focused (or only) viewer; none open: a new one, rooted here
 mdh video FILE [N] play|pause|toggle [0:12]               # video N (1-based, default 1)
 mdh video FILE [N] seek 0:12                              # jump; keeps playing or paused
 ```

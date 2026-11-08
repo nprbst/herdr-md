@@ -9,7 +9,7 @@
 // them and scrolls to `focus` whenever `seq` changes.
 import { View, div, image } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, TextView, InputState, Input } from "gpui-base";
-import { props, readTextFile, watchFolder, exec, theme, settings, home, nextCommand, panes, run } from "herdr";
+import { props, readTextFile, watchFolder, exec, theme, settings, home, nextCommand, panes, focused, run } from "herdr";
 import { marked } from "./marked.js";
 import { inlineMath } from "./tex.js";
 import { hash as bhash, diffBlocks, slug, labelOf, inlineRoles, alertOf, ALERTS } from "./doc.js";
@@ -45,7 +45,8 @@ const HELP = [[
     ["ctrl-d ctrl-u", "half page down / up"], ["ctrl-f ctrl-b", "page down / up"], ["space", "page down"], ["ctrl-e ctrl-y", "scroll a line, cursor stays"], ["zz", "center the cursor"]]],
   ["SHARE", [["V", "select blocks"], ["y", "copy the markdown source"], ["p", "pin the selection for Claude"], ["Esc", "unselect, close search, unpin"]]],
   ["FIND A FILE (ctrl-p)", [["ctrl-n ctrl-p", "next / previous (or ctrl-j ctrl-k, arrows)"], ["Enter", "open here (Backspace comes back)"],
-    ["ctrl-v", "open in a split to the right"], ["ctrl-d ctrl-u", "scroll the preview"], ["Esc", "close"]]],
+    ["ctrl-v", "open in a split to the right"], ["ctrl-d ctrl-u", "scroll the preview"], ["Esc", "close"],
+    ["cmd-shift-o", "anywhere in Herdr: a new viewer, picker open (keys.json)"]]],
 ], [
   ["READ", [["ctrl-p", "find a markdown file, with preview"], ["o", "outline"], ["Enter", "fold a heading, follow a link, zoom a figure, play a video"], ["O", "open a video in QuickTime"], ["Backspace", "back after a link"],
     ["za zc zo", "toggle / close / open fold"], ["zM zR", "fold / unfold all"], ["] [", "next / previous change"], ["c", "clear change marks"],
@@ -188,6 +189,13 @@ export default class Md extends View {
     this.pickInput.on("submit", (_e, cx) => this.pickOpen(cx));
     this.pickInput.on("focus", () => { this.pickTyping = true; });
     this.pickInput.on("blur", () => { this.pickTyping = false; });
+    // An empty viewer (no file) can start in the picker: `mdh pick` with no viewer
+    // open passes { pick: true, dir: <shell cwd> }; the cmd-shift-o key passes no dir.
+    // Without one it roots at the focused terminal's folder (read now: the new
+    // pane takes focus right after), else at the newest recent file's, else home.
+    this.pickRoot = this.file ? null : (props()?.dir || null);
+    if (!this.file && !this.pickRoot) { const f = focused(); if (f?.terminal && f.cwd) this.pickRoot = f.cwd; }
+    if (!this.file && props()?.pick) cx.timer.after(30, cx => { this.openPicker(cx); cx.notify(); });
     this.remember(this.file);
     this.load(cx);
     this.watch(cx);
@@ -201,8 +209,9 @@ export default class Md extends View {
         // `mdh pick` (herdr-app do herdr-md.pick): the focused viewer opens its
         // picker; with no viewer focused, the only viewer does (and takes focus).
         if (c === "pick") {
-          // Every copy hears it; the one holding the keyboard is the focused one.
-          const mine = panes().filter(p => p.mod === MOD);
+          // Shown copies hear it (viewers in other tabs don't), so "the only one"
+          // counts this tab's viewers; the one holding the keyboard is the focused one.
+          const tab = focused()?.tab, mine = panes().filter(p => p.mod === MOD && p.tab === tab);
           if (this.pick) continue;
           if (this.handle.is_focused() || this.typing) this.openPicker(cx);
           else if (mine.length === 1) { run("pane.focus", { pane: mine[0].pane }); this.openPicker(cx); }
@@ -215,7 +224,7 @@ export default class Md extends View {
   }
 
   load(cx) {
-    if (!this.file) { this.error = "No file given"; return; }
+    if (!this.file) return;   // the empty state (render) points at ctrl-p
     cx.spawn(async cx => {
       try {
         const text = await readTextFile(this.file);
@@ -338,7 +347,7 @@ export default class Md extends View {
   }
 
   navigate(file, frag, cx, push) {
-    if (push) this.history.push({ file: this.file, cursor: this.cursor });
+    if (push && this.file) this.history.push({ file: this.file, cursor: this.cursor });
     if (file === this.file) { if (frag) this.jumpAnchor(frag); return cx.notify(); }
     this.file = file.replace(/\/[^/]+\/\.\.\//g, "/"); this.remember(this.file);
     this.folded.clear(); this.offset = 0; this.motion = 0; this.cursor = 0; this.anchor = null;   // heights kept: see load()
@@ -353,8 +362,8 @@ export default class Md extends View {
     this.navigate(h.file, null, cx, false); this.restore = { cursor: h.cursor };
   }
 
+  // Runs for an empty viewer too: it starts reading notes once a file is picked.
   watchNotes(cx) {
-    if (!this.file) return;
     cx.spawn(async cx => {
       await exec("mkdir", ["-p", NOTES()]);
       for (;;) {
@@ -365,6 +374,7 @@ export default class Md extends View {
   }
 
   async readNotes(cx) {
+    if (!this.file) return;
     let n = null;
     try { n = JSON.parse(await readTextFile(`${NOTES()}/${noteKey(this.file)}`) ?? "null"); } catch {}
     this.notes = n && Array.isArray(n.highlights) ? n : { highlights: [] };
@@ -1045,17 +1055,21 @@ export default class Md extends View {
   }
 
   openPicker(cx) {
-    if (this.pick || !this.file) return;
+    if (this.pick) return;
     this.outline = false; if (this.help) this.help = false; this.helpIn = 0;
     this.pick = { query: "", rows: [], sel: 0, top: 0, pvY: 0 }; this.pickIn = 0;
     this.pickInput.set_value(""); this.pickInput.focus();
     // A listing of this tree from an earlier open shows at once; a fresh one replaces it.
-    if (this.pickList && !this.file.startsWith(this.pickList.root + "/")) this.pickList = null;
+    const here = this.file ?? this.pickRoot;
+    if (this.pickList && !(here && (here === this.pickList.root || here.startsWith(this.pickList.root + "/")))) this.pickList = null;
     this.rerank(cx, false);
     cx.timer.after(16, cx => { this.pickIn = 1; cx.notify(); });
     cx.spawn(async cx => {
-      const [list, recent] = await Promise.all([listFiles(exec, dirname(this.file)), readTextFile(RECENT()).catch(() => null)]);
-      this.pickList = list; this.recent = parseRecent(recent);
+      const recent = parseRecent(await readTextFile(RECENT()).catch(() => null));
+      // No file behind the picker: its root, else the newest recent file's folder, else home.
+      if (!this.file && !this.pickRoot) this.pickRoot = recent[0] ? dirname(recent[0]) : home();
+      const list = await listFiles(exec, this.file ? dirname(this.file) : this.pickRoot);
+      this.pickList = list; this.recent = recent;
       if (this.pick) this.rerank(cx, true);
     });
   }
@@ -1433,6 +1447,7 @@ export default class Md extends View {
               .when(Boolean(this.error), el => el.child(div().text_color(t.blocked).child(this.error)))
               .children(this.blocks.map((tok, i) => this.row(tok, i, t)))
               .when(this.removed.has(this.blocks.length), el => el.child(this.removedMark(this.removed.get(this.blocks.length), t))))))
+        .when(!this.file && !this.error, el => el.child(this.emptyState(t)))
         .when(thumbH > 0, el => el.child(div().absolute().right(3).w(6).rounded(3).bg(t.border).top(thumbY).h(thumbH).transition("top", { duration: this.motion, easing: "ease-out" })))
         .when(this.outline, el => el.child(this.outlinePanel(t)))
         .when(Boolean(this.zoom), el => el.child(this.zoomPanel(t)))
@@ -1447,6 +1462,17 @@ export default class Md extends View {
             .on_click((_e, cx) => this.closeSearch(cx)).child("✕"))))
         .when(Boolean(this.pick), el => el.child(this.pickPanel(t))))
       .child(this.statusBar(t));
+  }
+
+  // No file yet (an empty viewer, or Esc in its picker): one calm line pointing at ctrl-p.
+  emptyState(t) {
+    const chip = k => div().px(6).rounded(4).bg(t.surface).border_1().border_color(t.border).text_size(12).text_color(t.muted).child(k);
+    return v_flex().id("md-empty").absolute().top(0).left(0).size_full().items_center().justify_center().gap(10).font_family(BODY())
+      .child(h_flex().gap(10).items_center().text_size(SIZE.body).text_color(t.muted)
+        .child(div().child("Find a markdown file")).child(div().text_color(t.dim).child("·")).child(chip("ctrl-p")))
+      .child(h_flex().gap(6).items_center().text_size(12).text_color(t.dim)
+        .when(Boolean(this.pickRoot), el => el.child(div().child(`in ${this.pickRoot.replace(home(), "~")}`)).child(div().child("·")))
+        .child(chip("q")).child(div().child("close")));
   }
 
   // Top: where you are. The file (home shortened), and a crumb back after a link.

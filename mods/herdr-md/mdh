@@ -13,9 +13,12 @@
   mdh sel                                       print what the person last sent from the viewer
                                                 (V to select, p to pin): file, lines, text
   mdh pick                                      open the file picker (ctrl-p) in the focused viewer,
-                                                or in the only one
+                                                or in the only one; with no viewer open, open an empty
+                                                one beside the focused pane, in the picker, rooted at
+                                                this shell's folder (its git repo if it's in one)
 
 The viewer watches ~/.cache/herdr-md/ and redraws and scrolls when a file there changes.
+Anywhere in Herdr: cmd-shift-o opens a viewer straight into the picker (a keys.json binding, see README).
 Viewer keys: ctrl-p find a file (fuzzy, with preview), j/k move the cursor, V visual select, y copy, p pin for Claude, Enter fold/follow/zoom/play,
 O open a video in QuickTime, za fold, / search, n/N next match or highlight, # line numbers, ? key help, q close.
 """
@@ -63,7 +66,22 @@ def main():
     if a.cmd == "pick":
         # Every viewer hears it; the focused one (or the only one) opens its picker.
         r = subprocess.run(["herdr-app", "do", "herdr-md.pick"], capture_output=True, text=True)
-        sys.stderr.write(r.stderr); sys.exit(r.returncode)
+        if r.returncode == 0:
+            sys.exit(0)
+        if "unknown command" not in r.stdout + r.stderr:
+            sys.stdout.write(r.stdout); sys.stderr.write(r.stderr); sys.exit(r.returncode)
+        # No viewer loaded, so nobody heard it: open an empty one in its picker,
+        # rooted here (the picker widens a folder inside a git repo to the repo).
+        cwd = os.getcwd()
+        pwd = os.environ.get("PWD")
+        try:
+            if pwd and os.path.samefile(pwd, cwd):
+                cwd = pwd   # keep the person's spelling (symlinks)
+        except OSError:
+            pass
+        args = {"direction": "right", "mod": "herdr-md", "props": {"pick": True, "dir": cwd}}
+        r = subprocess.run(["herdr-app", "do", "pane.split", json.dumps(args)], capture_output=True, text=True)
+        sys.stdout.write(r.stdout); sys.stderr.write(r.stderr); sys.exit(r.returncode)
     if a.cmd == "sel":
         try:
             with open(os.path.join(DIR, "selection.json")) as f:
