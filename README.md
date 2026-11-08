@@ -59,7 +59,10 @@ Remote images in documents are never fetched.
 
 **Media:** GIFs animate. A local `![](clip.mp4)` (or `.mov`, `.m4v`, `.webm`)
 plays inline with no sound: the first 20 s at 10 fps, at most 720 px wide,
-as JPEG frames cached in `.cache/v/`. Enter plays it, `O` hands the file to
+as JPEG frames cached in `.cache/v/`, extracted on first play (only a poster
+frame on open). Only real MP4/QuickTime or WebM files are decoded: ffmpeg runs
+with the file protocol only and the container forced, so a playlist named
+`.mp4` is refused. Enter plays it, `O` hands the file to
 QuickTime Player. See [`demo/media.md`](demo/media.md).
 
 Try it on the bundled tour: `mdh open demo/tour.md`.

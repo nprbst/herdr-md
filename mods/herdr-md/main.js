@@ -64,7 +64,7 @@ class Video extends View {
     // Frames follow the wall clock (the timer only polls), so a slow render
     // drops a frame instead of slowing the clip down.
     cx.timer.every(1000 / VIDEO_FPS / 3, cx => {
-      if (!this.playing) return;
+      if (!this.playing || !this.p.meta.n) return;
       const n = this.p.meta.n, i = Math.min(n - 1, Math.floor((Date.now() - this.t0) * VIDEO_FPS / 1000));
       if (i === this.i && i < n - 1) return;
       this.i = i; if (i >= n - 1) this.playing = false;
@@ -93,20 +93,20 @@ class Video extends View {
 
   render(cx) {
     const { dir, meta, w, h, t } = this.p, n = meta.n;
-    const frame = i => `${dir}/f${String(Math.max(0, Math.min(n - 1, i)) + 1).padStart(4, "0")}.jpg`;
+    const frame = i => n ? `${dir}/f${String(Math.max(0, Math.min(n - 1, i)) + 1).padStart(4, "0")}.jpg` : `${dir}/poster.jpg`;
     const pic = i => image(frame(i)).absolute().top(0).left(0).w(w).h(h);
     // Next frame at the bottom (so it decodes before it's needed), previous frame
     // under the current one (shown if the current one hasn't decoded yet).
     const shown = Math.min(meta.dur, VIDEO_MAX), cut = meta.dur > VIDEO_MAX + 0.5;
-    return div().id("video").relative().w(w).h(h).rounded(8).overflow_hidden().bg("#000000").cursor_pointer()
-      .on_click((_e, cx) => { this.setPlaying(!this.playing); cx.notify(); })
+    return div().id("video").relative().w(w).h(h).rounded(8).overflow_hidden().bg("#000000")
       .child(pic(this.i + 1)).child(pic(this.i - 1)).child(pic(this.i))
       .child(div().absolute().left(0).bottom(0).h(3).bg(t.accent).w(n > 1 ? w * this.i / (n - 1) : 0))
       .child(h_flex().absolute().left(8).bottom(8).gap(8).items_center().px(8).py(1).rounded(6).bg("#000000aa").text_size(12).text_color("#ffffff")
         .child(div().child(this.playing ? "❚❚" : "▶"))
         .child(div().child(`${clock(this.i / VIDEO_FPS)} / ${clock(shown)}${cut ? " (first " + VIDEO_MAX + "s)" : ""}`)))
       .when(!this.playing, el => el.child(h_flex().absolute().top(0).left(0).w(w).h(h).items_center().justify_center()
-        .child(h_flex().w(56).h(56).rounded(28).bg("#000000aa").items_center().justify_center().text_size(22).text_color("#ffffff").child("▶"))));
+        .child(h_flex().h(56).min_w(56).px(this.p.loading ? 16 : 0).rounded(28).bg("#000000aa").items_center().justify_center().text_size(this.p.loading ? 14 : 22).text_color("#ffffff")
+          .child(this.p.loading ? "preparing frames…" : "▶"))));
   }
 }
 
@@ -487,30 +487,38 @@ export default class Md extends View {
     }
   }
 
-  // Videos: extract frames once per file version (path, mtime and size), then
-  // make one nested Video view per clip. this.videoList is document order (mdh video N).
+  // Videos come from untrusted documents, and ffmpeg sniffs content, not the
+  // file extension: an "x.mp4" can be an HLS or concat playlist that makes it
+  // fetch URLs or read other local files into frames we'd show. So ffprobe
+  // first, with only the file protocol allowed; refuse any container but
+  // MP4/QuickTime (or Matroska/WebM for .webm); then decode with that format
+  // forced and the same protocol whitelist. Paths reach sh as "$1"/"$2"
+  // arguments, never spliced into the script.
+  // On open: probe and a poster frame only. Frames are extracted on first play.
+  // this.videoList is document order (mdh video N).
   async loadVideos(tokens, cx) {
     const hrefs = [];
     marked.walkTokens(tokens, tok => { if (tok.type === "image" && isVideo(tok.href)) hrefs.push(tok.href); });
     this.videoList = [...new Set(hrefs)];
     for (const href of this.videoList) {
       const v = this.videos[href] ??= {};
-      if (/^[a-z]+:\/\//i.test(href)) { v.remote = true; continue; }
+      if (/^[a-z][a-z0-9+.-]*:/i.test(href)) { v.remote = true; continue; }
       v.abs = href.startsWith("/") ? href : `${dirname(this.file)}/${decodeURIComponent(href)}`;
       const st = await exec("stat", ["-f", "%m:%z", v.abs]);
       if (st.code !== 0) { v.missing = true; continue; }
-      const key = fnv(v.abs + st.stdout.trim()), dir = `${CACHE}/v/${key}`, absDir = `${home()}/.config/herdr-app/${dir}`;
+      const key = fnv(v.abs + st.stdout.trim()), dir = `${CACHE}/v/${key}`;
       if (v.dir === dir && v.meta) continue;
-      v.dir = dir; v.meta = null; v.missing = false; v.error = null; cx.notify();
+      v.dir = dir; v.absDir = `${home()}/.config/herdr-app/${dir}`; v.meta = null; v.missing = false; v.error = null; v.extracting = null; cx.notify();
       let meta = null;
-      try { meta = JSON.parse(await readTextFile(`${absDir}/meta.json`) ?? "null"); } catch {}
+      try { meta = JSON.parse(await readTextFile(`${v.absDir}/meta.json`) ?? "null"); } catch {}
       if (!meta) {
-        const r = await exec("sh", ["-c", `PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"; set -e; d="$1"; rm -rf "$d.tmp"; mkdir -p "$d.tmp"
-          ffmpeg -v error -y -t ${VIDEO_MAX} -i "$2" -an -vf "fps=${VIDEO_FPS},scale='min(iw,${VIDEO_W})':-2" -q:v 4 "$d.tmp/f%04d.jpg"
-          n=$(ls "$d.tmp" | grep -c jpg); wh=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0:s=, "$d.tmp/f0001.jpg")
-          dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$2")
-          printf '{"n":%s,"w":%s,"h":%s,"dur":%s}' "$n" "\${wh%%,*}" "\${wh##*,}" "\${dur:-0}" > "$d.tmp/meta.json"; rm -rf "$d"; mv "$d.tmp" "$d"; cat "$d/meta.json"`, "video", absDir, v.abs]);
-        try { meta = JSON.parse(r.stdout); } catch { v.error = (r.stderr || "ffmpeg failed (is it installed?)").trim().split("\n").pop().slice(0, 160); cx.notify(); continue; }
+        const probe = await this.probeVideo(v.abs);
+        if (probe.error) { v.error = probe.error; cx.notify(); continue; }
+        const r = await exec("sh", ["-c", `PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"; set -e; mkdir -p "$1"
+          ffmpeg -v error -y -protocol_whitelist file -f ${probe.fmt} -i "file:$2" -an -frames:v 1 -vf "scale='min(iw,${VIDEO_W})':-2" -q:v 4 "$1/poster.jpg"`,
+          "video", v.absDir, v.abs]);
+        if (r.code !== 0) { v.error = (r.stderr || "ffmpeg failed").trim().split("\n").pop().slice(0, 160); cx.notify(); continue; }
+        meta = { n: 0, w: probe.w, h: probe.h, dur: probe.dur, fmt: probe.fmt };
       }
       v.meta = meta;
       const props = this.videoProps(v);
@@ -520,13 +528,46 @@ export default class Md extends View {
     }
   }
 
+  // ffprobe a local file: { fmt, w, h, dur } for an allowed container, else { error }.
+  async probeVideo(abs) {
+    if (!abs.startsWith("/")) return { error: "not a local file" };
+    const r = await exec("sh", ["-c", `PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
+      ffprobe -v error -protocol_whitelist file -select_streams v:0 -show_entries format=format_name,duration:stream=width,height -of json "file:$1"`, "probe", abs]);
+    let j = null; try { j = JSON.parse(r.stdout); } catch {}
+    if (!j) return { error: (r.stderr || "ffprobe failed (is ffmpeg installed?)").trim().split("\n").pop().slice(0, 160) };
+    const name = j.format?.format_name, webm = /\.webm$/i.test(abs);
+    const fmt = !webm && name === "mov,mp4,m4a,3gp,3g2,mj2" ? "mov" : webm && name === "matroska,webm" ? "matroska" : null;
+    const s0 = j.streams?.[0];
+    if (!fmt || !s0?.width) return { error: `not a ${webm ? "WebM" : "MP4/QuickTime"} video (${name ?? "unknown"}); refused` };
+    return { fmt, w: s0.width, h: s0.height, dur: Number(j.format.duration) || 0 };
+  }
+
+  // First play: extract the frame sequence (format forced, file protocol only).
+  extractFrames(v, cx) {
+    if (v.extracting) return;
+    v.extracting = true; v.entity?.set_props(this.videoProps(v));
+    cx.spawn(async cx => {
+      const m = v.meta;
+      const r = await exec("sh", ["-c", `PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"; set -e; d="$1"; rm -rf "$d/f.tmp"; mkdir -p "$d/f.tmp"
+        ffmpeg -v error -y -protocol_whitelist file -f ${m.fmt} -t ${VIDEO_MAX} -i "file:$2" -an -vf "fps=${VIDEO_FPS},scale='min(iw,${VIDEO_W})':-2" -q:v 4 "$d/f.tmp/f%04d.jpg"
+        mv "$d/f.tmp/"*.jpg "$d/"; rmdir "$d/f.tmp"; ls "$d" | grep -c '^f[0-9]*\\.jpg$'`, "video", v.absDir, v.abs]);
+      v.extracting = false;
+      const n = parseInt(r.stdout, 10);
+      if (r.code !== 0 || !(n > 0)) { v.error = (r.stderr || "ffmpeg failed").trim().split("\n").pop().slice(0, 160); cx.notify(); return; }
+      v.meta = { ...m, n };
+      exec("sh", ["-c", 'printf %s "$2" > "$1/meta.json"', "meta", v.absDir, JSON.stringify(v.meta)]);
+      if (v.cmd) v.cmd = { ...v.cmd, seq: v.cmd.seq + 1 };   // replay the command that asked to play
+      v.entity.set_props(this.videoProps(v)); cx.notify(v.entity); cx.notify();
+    });
+  }
+
   videoSize(v) {
     let w = Math.min(v.meta.w, this.colW), h = Math.round(v.meta.h * w / v.meta.w);
     if (h > 560) { w = Math.round(w * 560 / h); h = 560; }
     return { w, h };
   }
 
-  videoProps(v, cmd) { return { dir: v.dir, meta: v.meta, ...this.videoSize(v), t: theme(), cmd: cmd ?? v.cmd }; }
+  videoProps(v) { return { dir: v.dir, meta: v.meta, ...this.videoSize(v), t: theme(), cmd: v.meta.n ? v.cmd : null, loading: Boolean(v.extracting) }; }
 
   applyVideo(cx) {
     const c = this.pendingVideo; if (!c) return;
@@ -540,7 +581,9 @@ export default class Md extends View {
   // Send a play/pause/seek command to video n (0-based, document order).
   videoCmd(n, state, t, cx) {
     const v = this.videos[this.videoList?.[n]]; if (!v?.entity) return false;
-    v.cmd = { state, t, seq: (v.cmd?.seq ?? 0) + 1 }; v.entity.set_props(this.videoProps(v)); cx.notify(v.entity);
+    v.cmd = { state, t, seq: (v.cmd?.seq ?? 0) + 1 };
+    if (!v.meta.n && state !== "pause") { this.extractFrames(v, cx); return true; }
+    v.entity.set_props(this.videoProps(v)); cx.notify(v.entity);
     return true;
   }
 
@@ -551,7 +594,9 @@ export default class Md extends View {
     const note = v?.remote ? "remote video not fetched" : v?.missing ? "not found" : v?.error ? `couldn't prepare: ${v.error}` : "preparing frames…";
     if (!v?.entity || !v.meta) return div().my(6).px(12).py(8).rounded(6).bg(t.surface).text_color(v?.error ? t.blocked : t.dim).text_size(13)
       .child(`▶  ${tok.text || tok.href} · ${note}`);
-    return v_flex().my(8).gap(6).items_center().child(v.entity)
+    const n = this.videoList.indexOf(tok.href);
+    return v_flex().my(8).gap(6).items_center()
+      .child(div().id(`video-${n}`).cursor_pointer().on_click((_e, cx) => this.videoCmd(n, "toggle", undefined, cx)).child(v.entity))
       .child(div().text_size(13).text_color(t.dim).italic().child(`${tok.text ? tok.text + " · " : ""}Enter plays · O opens in QuickTime`));
   }
 
