@@ -694,6 +694,8 @@ export default class Md extends View {
     }
     this.flash = null;
     if (mod.control) {
+      // ctrl-e / ctrl-y: scroll the view a line (40px) without moving the cursor, as in vim.
+      if (e.key === "e" || e.key === "y") { this.scrollBy(e.key === "e" ? 40 : -40, cx); this.motion = STEP; return cx.stop_propagation(); }
       const c = { d: half, u: -half, f: page, b: -page }[e.key];
       if (c) { this.moveBy(c, cx); cx.stop_propagation(); }
       return;

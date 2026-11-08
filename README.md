@@ -111,6 +111,7 @@ block). For Claude Code there's a ready skill in
 |---|---|
 | `j` `k` (counts: `5j`), `gg` `G` | move the cursor (one block is one line) |
 | `ctrl-d` `ctrl-u`, `ctrl-f` `ctrl-b`, `space` | half / full page |
+| `ctrl-e` `ctrl-y` | scroll a line, cursor stays |
 | `{` `}` | previous / next heading |
 | `]` `[` · `c` | next / previous changed block · clear the change marks |
 | `o` | outline (`j`/`k`, `Enter`, `Esc`) |
