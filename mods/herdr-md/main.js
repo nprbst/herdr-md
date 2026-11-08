@@ -44,9 +44,10 @@ const HELP = [[
     ["ctrl-d ctrl-u", "half page down / up"], ["ctrl-f ctrl-b", "page down / up"], ["space", "page down"], ["ctrl-e ctrl-y", "scroll a line, cursor stays"], ["zz", "center the cursor"]]],
   ["SHARE", [["V", "select blocks"], ["y", "copy the markdown source"], ["p", "pin the selection for Claude"], ["Esc", "unselect, close search, unpin"]]],
 ], [
-  ["READ", [["o", "outline"], ["Enter", "fold a heading or follow a link"], ["Backspace", "back after a link"],
+  ["READ", [["o", "outline"], ["Enter", "fold a heading, follow a link, zoom a figure"], ["Backspace", "back after a link"],
     ["za zc zo", "toggle / close / open fold"], ["zM zR", "fold / unfold all"], ["] [", "next / previous change"], ["c", "clear change marks"],
     ["/", "search"], ["n N", "next / previous match or note"], ["#", "line numbers"]]],
+  ["ZOOM (Enter on a diagram or image)", [["h j k l", "pan (or drag, or scroll)"], ["+ -", "zoom in / out (or ctrl-scroll)"], ["0", "fit"], ["Esc", "close"]]],
   ["VIEWER", [["? h", "this help"], ["q", "close the viewer"]]],
 ]];
 const MODIFIER_KEYS = ["shift", "control", "alt", "platform", "function", "capslock"];
@@ -102,7 +103,7 @@ export default class Md extends View {
     this.folded = new Set(); this.hidden = [];
     this.labels = new Map(); this.anchors = new Map(); this.changed = new Set(); this.removed = new Map(); this.lastHashes = null;
     this.history = []; this.pendingAnchor = null; this.restore = null; this.outline = false; this.oi = 0; this.watchGen = 0;
-    this.help = false; this.helpIn = 0;
+    this.help = false; this.helpIn = 0; this.zoom = null; this.viewW = 0;
     this.query = ""; this.matches = []; this.mi = 0; this.searching = false; this.typing = false;
     // Vim-ish cursor: one rendered block is one "line". anchor !== null means visual mode.
     this.cursor = 0; this.anchor = null; this.pending = ""; this.count = ""; this.numbers = true; this.picked = null; this.src = "";
@@ -617,7 +618,7 @@ export default class Md extends View {
     const numTop = pad + (tok.type === "code" ? 2 : (fs * 1.65 - 19) / 2);
     const changed = this.changed.has(i), gone = this.removed.get(i);
     return v_flex().id(`row-${i}`).relative()
-      .on_mouse_down("left", (_e, cx) => { this.cursor = i; this.handle.focus(); cx.notify(); })
+      .on_mouse_down("left", (_e, cx) => { if (this.zoom) return; this.cursor = i; this.handle.focus(); cx.notify(); })
       .when(Boolean(gone), el => el.child(this.removedMark(gone, t)))
       .when(Boolean(picked) && i === this.picked[0], el => el.child(h_flex().mb(2).gap(6).items_center().text_size(11).text_color(t.ansi4)
         .child(div().child("📌 Pinned for Claude")).child(div().text_color(t.dim).child("· Esc unpins"))))
@@ -650,9 +651,128 @@ export default class Md extends View {
   activate(cx) {
     const b = this.blocks[this.cursor]; if (!b) return;
     if (b.type === "heading") { this.toggleFold(this.cursor); return cx.notify(); }
+    if (this.openZoom(b, cx)) return;
     const m = /\[[^\]]*\]\(([^)\s]+)[^)]*\)/.exec(b.raw);
     if (m) return this.follow(m[1], cx);
-    this.flash = "Enter: fold a heading or follow a link · p pins for Claude"; cx.notify();
+    this.flash = "Enter: fold a heading, follow a link or zoom a figure · p pins for Claude"; cx.notify();
+  }
+
+  // ---- zoom: Enter on a diagram or image fills the pane with it ----
+  // gpui-kit has no scale transform, so zooming resizes the image and panning
+  // moves it; GPUI animates left/top/width/height natively. A Mermaid diagram
+  // is re-rendered at 4x on open so it stays sharp when zoomed in.
+  zoomTarget(b) {
+    if (b.type === "paragraph") {
+      const im = b.tokens.find(x => x.type === "image"), img = im && this.images[im.href];
+      return img?.path ? { path: img.path, w: img.w, h: img.h } : null;
+    }
+    if (b.type === "math" || (b.type === "code" && (isMath(b) || isMermaid(b)))) {
+      const f = this.figs[b.fig];
+      return f?.path ? { path: f.path, w: f.w, h: f.h, tok: isMermaid(b) ? b : null } : null;
+    }
+    return null;
+  }
+
+  openZoom(b, cx) {
+    const z = this.zoomTarget(b); if (!z) return false;
+    this.zoom = { ...z, hi: null, show: z.path, in: 0, motion: 0, drag: null };
+    this.fitZoom(0.92); this.zoom.motion = 0; cx.notify();
+    cx.timer.after(16, cx => { if (!this.zoom) return; this.zoom.in = 1; this.zoom.motion = 320; this.fitZoom(); cx.notify(); });
+    if (z.tok) this.hiRes(z.tok, cx);
+    return true;
+  }
+
+  // The 4x PNG loads invisibly first (image() shows nothing while it decodes),
+  // then replaces the 2x one in place.
+  hiRes(tok, cx) {
+    const t = theme(), root = `${home()}/.config/herdr-app/${FIG}`, out = `${root}/${tok.fig}@4.png`, z = this.zoom;
+    cx.spawn(async cx => {
+      const r = await this.runRenderer(JSON.stringify([{ kind: "mermaid", scale: 4, src: tok.text, out, font: settings().font_family || "sans-serif",
+        colors: { fg: t.foreground, surface: t.surface, raised: t.raised, bg: t.background, blue: t.ansi4, purple: t.ansi5, dim: t.dim } }]));
+      let res = null; try { res = JSON.parse(r.stdout)[0]; } catch {}
+      if (this.zoom !== z || !res || res.error) return;
+      z.hi = `${FIG}/${tok.fig}@4.png`; cx.notify();
+      cx.timer.after(600, cx => { if (this.zoom === z) { z.show = z.hi; z.hi = null; cx.notify(); } });
+    });
+  }
+
+  zoomArea() { return { vw: Math.max(100, this.viewW), vh: Math.max(100, this.viewH) }; }
+
+  fitScale() { const { vw, vh } = this.zoomArea(), z = this.zoom; return Math.min((vw - 64) / z.w, (vh - 96) / z.h, 4); }
+
+  fitZoom(k = 1) {
+    const z = this.zoom, { vw, vh } = this.zoomArea();
+    z.s = this.fitScale() * k; z.x = (vw - z.w * z.s) / 2; z.y = (vh - 28 - z.h * z.s) / 2;
+  }
+
+  // Keep the image on screen: centered on an axis where it fits, else no
+  // further past an edge than a small margin.
+  clampZoom() {
+    const z = this.zoom, { vw, vh } = this.zoomArea(), W = z.w * z.s, H = z.h * z.s, M = 32;
+    z.x = W <= vw - 2 * M ? (vw - W) / 2 : Math.min(M, Math.max(vw - M - W, z.x));
+    z.y = H <= vh - 28 - 2 * M ? (vh - 28 - H) / 2 : Math.min(M, Math.max(vh - 28 - M - H, z.y));
+  }
+
+  // Zoom by factor k, keeping the point (px, py) of the pane still.
+  zoomAt(k, px, py, motion, cx) {
+    const z = this.zoom, fit = this.fitScale();
+    const s = Math.min(Math.max(z.s * k, Math.min(fit, 1) * 0.5), Math.max(8, fit));
+    z.x = px - (px - z.x) * s / z.s; z.y = py - (py - z.y) * s / z.s; z.s = s;
+    z.motion = motion; this.clampZoom(); cx.notify();
+  }
+
+  panZoom(dx, dy, motion, cx) { const z = this.zoom; z.x += dx; z.y += dy; z.motion = motion; this.clampZoom(); cx.notify(); }
+
+  closeZoom(cx) {
+    const z = this.zoom; z.in = 0; z.motion = 200; cx.notify();
+    cx.timer.after(180, cx => { if (this.zoom === z) { this.zoom = null; cx.notify(); } });
+  }
+
+  zoomKeys(k, mod, cx) {
+    cx.stop_propagation();
+    const { vw, vh } = this.zoomArea(), step = 90;
+    if (mod.control) return;
+    switch (k) {
+      case "h": case "left": return this.panZoom(step, 0, 200, cx);
+      case "l": case "right": return this.panZoom(-step, 0, 200, cx);
+      case "k": case "up": return this.panZoom(0, step, 200, cx);
+      case "j": case "down": return this.panZoom(0, -step, 200, cx);
+      case "+": case "=": return this.zoomAt(1.25, vw / 2, (vh - 28) / 2, 220, cx);
+      case "-": case "_": return this.zoomAt(0.8, vw / 2, (vh - 28) / 2, 220, cx);
+      case "0": this.zoom.motion = 320; this.fitZoom(); return cx.notify();
+      case "escape": case "q": case "enter": return this.closeZoom(cx);
+    }
+  }
+
+  zoomPanel(t) {
+    const z = this.zoom, W = z.w * z.s, H = z.h * z.s;
+    const move = { duration: z.motion, easing: "ease-out" };
+    const layer = (id, path, alpha) => image(path).id(id).absolute().left(z.x).top(z.y).w(W).h(H).opacity(alpha)
+      .transition("left", move).transition("top", move).transition("width", move).transition("height", move);
+    const pos = e => ({ x: (e.local_position?.x ?? e.position.x) / Z(), y: (e.local_position?.y ?? e.position.y) / Z() });
+    return div().id("md-zoom").absolute().top(0).left(0).size_full().overflow_hidden().bg(t.background)
+      .opacity(z.in).transition("opacity", { duration: 200, easing: "ease-out" })
+      .when(!z.drag, el => el.cursor_grab()).when(Boolean(z.drag), el => el.cursor_grabbing())
+      .on_scroll_wheel((e, cx) => {
+        cx.stop_propagation();
+        const p = pos(e);
+        if (e.modifiers?.control || e.modifiers?.platform) this.zoomAt(Math.exp(e.delta.y / Z() * 0.01), p.x, p.y, 60, cx);
+        else this.panZoom(e.delta.x / Z(), e.delta.y / Z(), 0, cx);
+      })
+      .on_mouse_down("left", (e, cx) => { const p = pos(e); z.drag = { mx: p.x, my: p.y, x: z.x, y: z.y }; this.handle.focus(); cx.notify(); })
+      .on_mouse_move((e, cx) => {
+        if (!z.drag) return;
+        const p = pos(e); z.x = z.drag.x + p.x - z.drag.mx; z.y = z.drag.y + p.y - z.drag.my; z.motion = 0; this.clampZoom(); cx.notify();
+      })
+      .on_mouse_up("left", (_e, cx) => { z.drag = null; cx.notify(); })
+      .child(div().id("md-zoom-plate").absolute().left(z.x - 16).top(z.y - 16).w(W + 32).h(H + 32).rounded(10).bg(t.surface).border_1().border_color(t.border)
+        .transition("left", move).transition("top", move).transition("width", move).transition("height", move))
+      .child(layer("md-zoom-img", z.show, 1))
+      .when(Boolean(z.hi), el => el.child(layer("md-zoom-hi", z.hi ?? z.show, 0.01)))
+      .child(h_flex().absolute().left(0).bottom(10).w_full().justify_center()
+        .child(h_flex().gap(10).px(12).py(3).rounded(8).bg(t.popover).border_1().border_color(t.input).text_size(12).font_family(BODY()).text_color(t.dim)
+          .child(div().text_color(t.foreground).font_semibold().child(`${Math.round(z.s * 100)}%`))
+          .child(div().child("hjkl / drag  pan · + −  zoom · 0  fit · Esc  close"))));
   }
 
   // ---- outline ----
@@ -762,6 +882,7 @@ export default class Md extends View {
     if (mod.platform || mod.alt) return;
     if (this.help) { if (!MODIFIER_KEYS.includes(e.key)) this.closeHelp(cx); return cx.stop_propagation(); }
     const k = mod.shift && e.key.length === 1 ? (e.key_char ?? e.key.toUpperCase()) : e.key;
+    if (this.zoom) return this.zoomKeys(k, mod, cx);
     const half = Math.max(80, this.viewH / 2), page = Math.max(100, this.viewH - 80);
     if (this.outline) {
       const hs = this.headings();
@@ -847,8 +968,8 @@ export default class Md extends View {
       .track_focus(this.handle).on_key_down((e, cx) => this.keys(e, cx))
       .child(this.headerBar(t))
       .child(div().id("md-view").flex_1().min_h(0).relative().overflow_hidden()
-        .on_size_change((size, cx) => { this.viewH = size.height / Z(); this.offset = this.clamp(this.offset); this.reaim(); cx.notify(); })
-        .on_scroll_wheel((e, cx) => this.scrollBy(-e.delta.y / Z(), cx))
+        .on_size_change((size, cx) => { this.viewH = size.height / Z(); this.viewW = size.width / Z(); if (this.zoom) this.clampZoom(); this.offset = this.clamp(this.offset); this.reaim(); cx.notify(); })
+        .on_scroll_wheel((e, cx) => { if (!this.zoom) this.scrollBy(-e.delta.y / Z(), cx); })
         .child(div().id("md-content").absolute().left(0).w_full().top(-this.offset)
           .transition("top", { duration: this.motion, easing: this.motion === GLIDE ? "ease-in-out" : "ease-out" })
           .on_size_change((size, cx) => { this.contentH = size.height / Z(); this.reaim(); cx.notify(); })
@@ -860,6 +981,7 @@ export default class Md extends View {
               .when(this.removed.has(this.blocks.length), el => el.child(this.removedMark(this.removed.get(this.blocks.length), t))))))
         .when(thumbH > 0, el => el.child(div().absolute().right(3).w(6).rounded(3).bg(t.border).top(thumbY).h(thumbH).transition("top", { duration: this.motion, easing: "ease-out" })))
         .when(this.outline, el => el.child(this.outlinePanel(t)))
+        .when(Boolean(this.zoom), el => el.child(this.zoomPanel(t)))
         .when(this.help, el => el.child(this.helpPanel(t)))
         .when(this.searching, el => el.child(h_flex().absolute().top(10).right(20).w(340).h(38).px(10).gap(8).items_center()
           .rounded(10).bg(t.popover).border_1().border_color(this.typing ? t.accent : t.input).shadow_md()

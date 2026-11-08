@@ -120,7 +120,8 @@ block). For Claude Code there's a ready skill in
 | `V` then `j`/`k` | select blocks |
 | `y` | copy the selection's markdown source |
 | `p` | pin the selection for the agent (`mdh sel` reads it) |
-| `Enter` | fold the heading, or follow the first link in the block |
+| `Enter` | fold the heading, follow the first link in the block, or zoom a diagram or image |
+| in a zoomed figure: `h` `j` `k` `l` or drag or scroll · `+` `-` or ctrl-scroll · `0` · `Esc` | pan · zoom (about the pointer) · fit · close |
 | `/` then `Enter` / `Shift-Enter`, `n` `N` | search; next / previous match (or highlight) |
 | `#` | line numbers on/off |
 | `Esc` | leave visual mode, close search, clear the sent selection |

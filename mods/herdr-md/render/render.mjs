@@ -1,7 +1,8 @@
 // Batch renderer for the md viewer: TeX -> SVG (MathJax, no browser) and
 // Mermaid -> PNG (mermaid-cli driving the installed Chrome, one browser per batch).
 //   node render.mjs '<jobs JSON>' | jobs.json   ->  prints [{ out, w, h, error? }] (w/h in CSS px)
-// jobs: [{ kind: "math" | "mermaid", src, out, color, font, display? }]
+// jobs: [{ kind: "math" | "mermaid", src, out, color, font, display?, scale? }]
+// scale: Mermaid's device pixel ratio (default 2; the zoom overlay asks for 4).
 // A job whose `out` exists is skipped (outputs are named by content hash).
 import fs from "node:fs";
 
@@ -64,7 +65,7 @@ async function mermaid(job) {
   }
   const c = job.colors || {};
   const { data } = await renderMermaid(browser, job.src, "png", {
-    viewport: { width: 1200, height: 800, deviceScaleFactor: 2 },
+    viewport: { width: 1200, height: 800, deviceScaleFactor: job.scale || 2 },
     backgroundColor: "transparent",
     mermaidConfig: {
       theme: "base",
@@ -84,7 +85,8 @@ async function mermaid(job) {
   const buf = Buffer.from(data);
   fs.writeFileSync(job.out, buf);
   const { w, h } = pngSize(buf);
-  return { w: Math.round(w / 2), h: Math.round(h / 2) };
+  const k = job.scale || 2;
+  return { w: Math.round(w / k), h: Math.round(h / k) };
 }
 
 for (const job of jobs) {
