@@ -64,6 +64,22 @@ function finish(root, kind, files) {
   return { root, kind, files: files.slice(0, MAX_FILES), total: files.length, capped: files.length > MAX_FILES };
 }
 
+// ---- preview source ----
+// The preview lexes only the start of a file. marked's lexer grows faster than
+// the text in Herdr's QuickJS (a 78 KB note took ~1 s in qjs, and in Herdr ran
+// the shared mod runtime out of memory, killing every mod), and the preview
+// draws at most a screenful of blocks anyway. Cut at a blank line (a block
+// boundary) at or before `max` characters, else a line end, else hard.
+export const PV_CHARS = 12000;
+export function previewSource(text, max = PV_CHARS) {
+  if (text.length <= max) return { text, cut: false };
+  const head = text.slice(0, max);
+  let at = head.lastIndexOf("\n\n");
+  if (at < max / 2) at = head.lastIndexOf("\n");
+  if (at < max / 2) at = max;
+  return { text: text.slice(0, at), cut: true };
+}
+
 // ---- recently opened (~/.cache/herdr-md/recent.json: absolute paths, newest first) ----
 export function parseRecent(text) {
   try { const a = JSON.parse(text ?? "[]"); return Array.isArray(a) ? a.filter(x => typeof x === "string") : []; } catch { return []; }

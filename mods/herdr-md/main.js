@@ -13,7 +13,7 @@ import { props, readTextFile, watchFolder, exec, theme, settings, home, nextComm
 import { marked } from "./marked.js";
 import { inlineMath } from "./tex.js";
 import { hash as bhash, diffBlocks, slug, labelOf, inlineRoles, alertOf, ALERTS } from "./doc.js";
-import { listFiles, parseRecent, pushRecent, rank, runs } from "./picker.js";
+import { listFiles, parseRecent, pushRecent, rank, runs, previewSource } from "./picker.js";
 
 // $$…$$ display math as its own block (single- or multi-line).
 marked.use({ extensions: [{
@@ -1120,14 +1120,16 @@ export default class Md extends View {
         try { text = await readTextFile(abs); } catch (e) { error = String(e).slice(0, 120); }
         if (seq !== this.pvSeq || !this.pick) return;
         const pv = { abs, blocks: [], codes: [], lines: 0, more: 0, error: error ?? (text === null ? "not found" : null) };
-        if (text !== null) {
-          const all = blocks(text, marked.lexer(text)).filter(b => !labelOf(b));
-          pv.blocks = all.slice(0, PV_BLOCKS); pv.more = all.length - pv.blocks.length; pv.lines = (text.match(/\n/g)?.length ?? 0) + 1;
+        if (text !== null) try {
+          // Only the start of the file is lexed (see previewSource in picker.js).
+          const src = previewSource(text);
+          const all = blocks(src.text, marked.lexer(src.text)).filter(b => !labelOf(b));
+          pv.blocks = all.slice(0, PV_BLOCKS); pv.more = all.length - pv.blocks.length; pv.cut = src.cut; pv.lines = (text.match(/\n/g)?.length ?? 0) + 1;
           // The blocks' own tokens (a list item's list), each made once.
           const top = [...new Set(pv.blocks.map(b => b.type === "listitem" ? b.list : b))];
           marked.walkTokens(top, tok => { tok.pv = true; if (isMath(tok) || isMermaid(tok)) tok.fig = this.figKey(tok); });
           this.prepare(top, pv.codes);
-        }
+        } catch (e) { pv.blocks = []; pv.error = `couldn't preview: ${String(e).slice(0, 100)}`; }
         this.pvCache.set(abs, pv);
         // Keep a few; drop the oldest and its code editors.
         while (this.pvCache.size > 12) { const [k, old] = this.pvCache.entries().next().value; if (old === this.pv) break; old.codes.forEach(c => c.release?.()); this.pvCache.delete(k); }
@@ -1256,7 +1258,8 @@ export default class Md extends View {
           .when(Boolean(pv?.error), el => el.child(div().pt(14).text_color(t.blocked).child(pv.error)))
           .when(Boolean(pv) && !pv.error && !pv.blocks.length, el => el.child(div().pt(14).text_color(t.dim).italic().child("empty file")))
           .children(body)
-          .when(Boolean(pv?.more), el => el.child(div().pt(12).text_size(12).text_color(t.dim).italic().child(`… ${pv.more} more block${pv.more === 1 ? "" : "s"}, Enter opens the file`)))));
+          .when(Boolean(pv?.more || pv?.cut), el => el.child(div().pt(12).text_size(12).text_color(t.dim).italic()
+            .child(pv.cut ? "… more below, Enter opens the file" : `… ${pv.more} more block${pv.more === 1 ? "" : "s"}, Enter opens the file`)))));
   }
 
   // ---- key help (? or h) ----
