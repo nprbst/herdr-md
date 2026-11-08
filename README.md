@@ -18,7 +18,15 @@ built so a coding agent can point at things in it while you read.
   `mdh sel` gives the agent the file, lines and text you meant.
 - **Vim-ish keys.** A block cursor with line numbers, visual selection,
   folding, search, and smooth animated scrolling.
-- **Live.** Reloads when the file changes on disk.
+- **See what the agent changed.** When the file changes on disk the view
+  glides to the first new or edited block and marks every one in the gutter,
+  even across sessions ("3 changed since you last looked"). `]` / `[` step
+  through them, `c` clears.
+- **Links, outline, callouts.** Relative `.md` links open in place
+  (`Backspace` goes back), `#heading` links glide, `o` pops up an outline.
+  GitHub `> [!NOTE]` / `[!TIP]` / `[!WARNING]` callouts render as cards, and
+  d2l-book roles (`:eqlabel:`, `:eqref:`, `:numref:`) become numbered
+  equations and working cross-references.
 
 ## Install
 
@@ -47,6 +55,8 @@ reads the file you open and the images it links, writes only inside its own
 folder (`.cache/`) and `~/.cache/herdr-md/` (highlights and your selection),
 and fetches nothing from the network except that one-time `npm install`.
 Remote images in documents are never fetched.
+
+Try it on the bundled tour: `mdh open demo/tour.md`.
 
 ## Open a file
 
@@ -101,7 +111,10 @@ block). For Claude Code there's a ready skill in
 |---|---|
 | `j` `k` (counts: `5j`), `gg` `G` | move the cursor (one block is one line) |
 | `ctrl-d` `ctrl-u`, `ctrl-f` `ctrl-b`, `space` | half / full page |
-| `{` `}` or `[` `]` | previous / next heading |
+| `{` `}` | previous / next heading |
+| `]` `[` · `c` | next / previous changed block · clear the change marks |
+| `o` | outline (`j`/`k`, `Enter`, `Esc`) |
+| `Backspace` | back after following a link |
 | `zz` · `za` `zc` `zo` · `zM` `zR` | center · toggle/close/open fold · fold/unfold all |
 | `V` then `j`/`k` | select blocks |
 | `y` | copy the selection's markdown source |

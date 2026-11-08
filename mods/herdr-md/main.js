@@ -12,6 +12,7 @@ import { v_flex, h_flex, Editor, EditorState, TextView, InputState, Input } from
 import { props, readTextFile, watchFolder, exec, theme, settings, home, nextCommand, panes } from "herdr";
 import { marked } from "./marked.js";
 import { inlineMath } from "./tex.js";
+import { hash as bhash, diffBlocks, slug, labelOf, inlineRoles, alertOf, ALERTS } from "./doc.js";
 
 // $$…$$ display math as its own block (single- or multi-line).
 marked.use({ extensions: [{
@@ -79,6 +80,8 @@ export default class Md extends View {
     this.offset = 0; this.motion = 0; this.heights = []; this.viewH = 0; this.contentH = 0; this.colW = MAX_W - PAD * 2;
     this.notes = { highlights: [] }; this.seq = null; this.pendingFocus = null; this.aim = null;
     this.folded = new Set(); this.hidden = [];
+    this.labels = new Map(); this.anchors = new Map(); this.changed = new Set(); this.removed = new Map(); this.lastHashes = null;
+    this.history = []; this.pendingAnchor = null; this.restore = null; this.outline = false; this.oi = 0; this.watchGen = 0;
     this.query = ""; this.matches = []; this.mi = 0; this.searching = false; this.typing = false;
     // Vim-ish cursor: one rendered block is one "line". anchor !== null means visual mode.
     this.cursor = 0; this.anchor = null; this.pending = ""; this.count = ""; this.numbers = true; this.picked = null; this.src = "";
@@ -112,12 +115,16 @@ export default class Md extends View {
           this.codes.forEach(c => c.release?.()); this.codes = [];
           const tokens = marked.lexer(text); this.src = text;
           this.prepare(tokens);
-          this.blocks = blocks(text, tokens); this.heights = []; this.error = null;
+          this.blocks = this.index(blocks(text, tokens)); this.heights = []; this.error = null;
           this.blocks.forEach(b => { b.find = squash(b.type === "heading" ? plain(b.tokens) : b.raw.replace(/[*_`#>|~]+/g, " ")); });
           if ([...this.folded].some(i => this.blocks[i]?.type !== "heading")) this.folded.clear();
           this.refold(); this.search(this.query);
           this.cursor = Math.min(this.cursor, Math.max(0, this.blocks.length - 1)); this.anchor = null;
-          this.resolve(); this.applyFocus(); this.reaim();
+          this.resolve(); this.applyFocus();
+          await this.markChanges();
+          if (this.pendingAnchor !== null) { this.jumpAnchor(this.pendingAnchor); this.pendingAnchor = null; }
+          else if (this.restore) { this.cursor = Math.min(this.restore.cursor, this.blocks.length - 1); this.aimAt(this.cursor); this.restore = null; }
+          this.reaim();
           cx.notify();
           await this.loadImages(tokens);
           cx.notify();
@@ -131,13 +138,96 @@ export default class Md extends View {
   // Reload when the file changes on disk.
   watch(cx) {
     if (!this.file) return;
-    const dir = dirname(this.file);
+    const gen = ++this.watchGen, dir = dirname(this.file);
     cx.spawn(async cx => {
-      for (;;) {
+      while (gen === this.watchGen) {
         const changed = await watchFolder(dir);
+        if (gen !== this.watchGen) return;   // navigated to another file
         if (changed.some(p => p === this.file || p === dir)) this.load(cx);
       }
     });
+  }
+
+  // Drop d2l label paragraphs (they name the block before them), number labeled
+  // equations, and index heading anchors for #links.
+  index(list) {
+    const out = [], labels = new Map(), anchors = new Map(); let eq = 0;
+    for (const b of list) {
+      const l = labelOf(b);
+      if (l) {
+        const target = out.length - 1;
+        if (target >= 0) {
+          const t = out[target];
+          if (l.eq) t.eqNum = ++eq;
+          labels.set(l.name, { block: target, num: t.eqNum, title: t.type === "heading" ? plain(t.tokens) : l.name.replace(/^(fig|sec|tab|eq)_/, "").replace(/_/g, " ") });
+        }
+        continue;
+      }
+      if (b.type === "heading") { let a = slug(plain(b.tokens)), k = a, n = 1; while (anchors.has(k)) k = `${a}-${n++}`; anchors.set(k, out.length); }
+      out.push(b);
+    }
+    this.labels = labels; this.anchors = anchors;
+    return out;
+  }
+
+  // Mark blocks that are new or edited since this file was last shown (in this
+  // pane, or in any viewer before: hashes are kept in ~/.cache/herdr-md/seen-*).
+  async markChanges() {
+    const hashes = this.blocks.map(b => bhash(b.raw.trim()));
+    const seen = `${NOTES()}/seen-${noteKey(this.file)}`;
+    let prev = this.lastHashes;
+    if (!prev) { try { prev = JSON.parse(await readTextFile(seen) ?? "null"); } catch { prev = null; } }
+    const { changed, removed } = diffBlocks(prev ?? [], hashes);
+    const fresh = this.lastHashes !== null;
+    this.changed = changed; this.removed = removed; this.lastHashes = hashes; this.ci = -1;
+    exec("sh", ["-c", 'mkdir -p "$1" && printf %s "$2" > "$3"', "seen", NOTES(), JSON.stringify(hashes), seen]);
+    // Glide to the first change, unless an agent highlight is taking the view.
+    if (changed.size && this.aim === null && this.pendingAnchor === null && !this.restore) {
+      const first = Math.min(...changed); this.cursor = first; this.aimAt(first);
+      this.flash = `${changed.size} changed${fresh ? "" : " since you last looked"} · ] next · c clear`;
+    }
+  }
+
+  stepChange(dir, cx) {
+    const list = [...this.changed].sort((a, b) => a - b); if (!list.length) return;
+    const after = list.filter(i => dir > 0 ? i > this.cursor : i < this.cursor);
+    const i = after.length ? (dir > 0 ? after[0] : after[after.length - 1]) : (dir > 0 ? list[0] : list[list.length - 1]);
+    this.cursor = i; this.aimAt(i); cx.notify();
+  }
+
+  // ---- links ----
+  jumpAnchor(frag) {
+    const f = decodeURIComponent(frag);
+    const i = f.startsWith("label:") ? this.labels.get(f.slice(6))?.block : this.anchors.get(f) ?? this.anchors.get(slug(f));
+    if (i !== undefined) { this.cursor = i; this.aimAt(i); }
+  }
+
+  follow(url, cx) {
+    if (url.startsWith("#")) {
+      this.history.push({ file: this.file, cursor: this.cursor });
+      this.jumpAnchor(url.slice(1)); return cx.notify();
+    }
+    if (/^[a-z][a-z0-9+.-]*:/i.test(url) && !url.startsWith("file:")) { exec("open", [url]); return; }
+    const [path, frag = null] = url.replace(/^file:\/\//, "").split("#");
+    const abs = path.startsWith("/") ? path : `${dirname(this.file)}/${decodeURIComponent(path)}`.replace(/\/\.\//g, "/");
+    if (/\.(md|markdown|mdx)$/i.test(abs)) this.navigate(abs, frag, cx, true);
+    else exec("open", [abs]);
+  }
+
+  navigate(file, frag, cx, push) {
+    if (push) this.history.push({ file: this.file, cursor: this.cursor });
+    if (file === this.file) { if (frag) this.jumpAnchor(frag); return cx.notify(); }
+    this.file = file.replace(/\/[^/]+\/\.\.\//g, "/");
+    this.folded.clear(); this.offset = 0; this.motion = 0; this.cursor = 0; this.anchor = null; this.heights = [];
+    this.lastHashes = null; this.changed = new Set(); this.removed = new Map(); this.seq = null; this.aim = null;
+    this.pendingAnchor = frag;
+    this.load(cx); this.watch(cx); this.readNotes(cx);
+  }
+
+  back(cx) {
+    const h = this.history.pop(); if (!h) return;
+    if (h.file === this.file) { this.cursor = h.cursor; this.aimAt(h.cursor); return cx.notify(); }
+    this.navigate(h.file, null, cx, false); this.restore = { cursor: h.cursor };
   }
 
   watchNotes(cx) {
@@ -349,7 +439,9 @@ export default class Md extends View {
       const max = this.colW - (math ? 0 : 34);
       let w = f.w, h = f.h; if (w > max) { h = Math.round(h * max / w); w = max; }
       return math
-        ? h_flex().w_full().justify_center().py(10).child(image(f.path).w(w).h(h))
+        ? h_flex().w_full().items_center().py(10)
+            .child(div().flex_1()).child(image(f.path).w(w).h(h))
+            .child(div().flex_1().text_right().text_size(13).text_color(t.dim).child(tok.eqNum ? `(${tok.eqNum})` : ""))
         : h_flex().w_full().justify_center().my(8).p(16).rounded(8).bg(t.surface).border_1().border_color(t.border).child(image(f.path).w(w).h(h));
     }
     const label = f.error ? `${math ? "math" : "mermaid"} · couldn't render: ${f.error}` : `${math ? "math" : "mermaid"} · rendering…`;
@@ -359,7 +451,8 @@ export default class Md extends View {
   }
 
   inline(id, md) {
-    return TextView.markdown(id, inlineMath(md)).selectable(true);
+    return TextView.markdown(id, inlineMath(inlineRoles(md, this.labels))).selectable(true)
+      .on_link_click((url, cx) => this.follow(url, cx));
   }
 
   picture(tok, id, t) {
@@ -416,9 +509,17 @@ export default class Md extends View {
               .on_click(() => exec("sh", ["-c", 'printf %s "$1" | LANG=en_US.UTF-8 pbcopy', "copy", tok.text])).child("copy")))
           .child(div().h(Math.min(lines, 40) * 20 + 4).child(Editor.new(tok.state).size_full()));
       }
-      case "blockquote":
+      case "blockquote": {
+        const al = alertOf(tok);
+        if (al) {
+          const a = ALERTS[al.kind], c = t[a.color];
+          return v_flex().my(8).px(16).py(10).gap(4).rounded(8).bg(c + "14").border_l(3).border_color(c)
+            .child(h_flex().gap(8).items_center().text_color(c).font_semibold().child(div().child(a.icon)).child(div().child(a.title)))
+            .child(this.inline(`${id}-al`, al.body));
+        }
         return v_flex().my(8).pl(16).py(2).border_l(3).border_color(t.ansi5).text_color(t.muted)
           .children(tok.tokens.map((c, j) => this.block(c, `${i}-${j}`, t)));
+      }
       case "listitem":
         return this.bullet(tok.item, tok.list.ordered, tok.n, id, i, t);
       case "list":
@@ -460,8 +561,11 @@ export default class Md extends View {
     const fs = tok.type === "heading" ? SIZE[`h${tok.depth}`] : SIZE.body;
     const pad = tok.type === "heading" ? (tok.depth <= 2 ? 22 : 14) : { paragraph: 5, listitem: 2, code: 8, table: 8, blockquote: 8 }[tok.type] ?? 4;
     const numTop = pad + (tok.type === "code" ? 2 : (fs * 1.65 - 19) / 2);
+    const changed = this.changed.has(i), gone = this.removed.get(i);
     return v_flex().id(`row-${i}`).relative()
       .on_mouse_down("left", (_e, cx) => { this.cursor = i; this.handle.focus(); cx.notify(); })
+      .when(Boolean(gone), el => el.child(this.removedMark(gone, t)))
+      .when(changed, el => el.child(div().absolute().left(-12).top(gone ? 26 : 4).bottom(4).w(3).rounded(2).bg(t.ansi2)))
       .when(this.numbers, el => el.child(div().absolute().left(-PAD - 4).top(numTop).w(PAD - 14).text_right().font_family(BODY()).text_size(12).line_height(1.6)
         .text_color(cur ? t.accent : t.dim).when(cur, el => el.font_semibold()).child(String(tok.from))))
       .on_size_change((size, cx) => { if (this.heights[i] !== size.height / Z()) { this.heights[i] = size.height / Z(); this.reaim(); cx.notify(); } })
@@ -479,6 +583,30 @@ export default class Md extends View {
           .child(div().flex_1().min_w(0).text_size(14).child(this.typed === Infinity
             ? this.inline(`note-${i}`, m.note)
             : div().child(plainNote(m.note).slice(0, this.typed) + "▍")))));
+  }
+
+  removedMark(n, t) {
+    return h_flex().gap(8).items_center().py(2).text_size(11).text_color(t.ansi1)
+      .child(div().w(10).h(1).bg(t.ansi1)).child(div().child(`${n} block${n === 1 ? "" : "s"} removed`)).child(div().flex_1().h(1).bg(t.ansi1 + "55"));
+  }
+
+  // ---- outline ----
+  headings() { return this.blocks.map((b, i) => b.type === "heading" ? i : -1).filter(i => i >= 0); }
+
+  outlinePanel(t) {
+    const hs = this.headings(), cur = this.sectionOf(this.cursor);
+    return v_flex().id("md-outline").absolute().top(10).left(10).w(340).max_h(Math.max(160, this.viewH - 20)).overflow_y_scrollbar()
+      .py(8).rounded(10).bg(t.popover).border_1().border_color(t.input).shadow_md().text_size(13).font_family(BODY())
+      .child(div().px(14).pb(6).text_size(11).text_color(t.dim).child("OUTLINE · j/k · Enter · Esc"))
+      .children(hs.map((h, k) => {
+        const b = this.blocks[h], sel = k === this.oi;
+        return div().id(`ol-${h}`).pl(14 + (b.depth - 1) * 14).pr(12).py(3).truncate().cursor_pointer()
+          .text_color(sel ? t.foreground : b.depth <= 2 ? t.muted : t.dim).when(b.depth <= 2, el => el.font_semibold())
+          .when(sel, el => el.bg(t.selected)).when(h === cur && !sel, el => el.text_color(t.accent))
+          .hover(s => s.bg(t.hover))
+          .on_click((_e, cx) => { this.outline = false; this.cursor = h; this.aimAt(h); this.handle.focus(); cx.notify(); })
+          .child(plain(b.tokens));
+      }));
   }
 
   // ---- cursor ----
@@ -541,6 +669,14 @@ export default class Md extends View {
     if (mod.platform || mod.alt) return;
     const k = mod.shift && e.key.length === 1 ? (e.key_char ?? e.key.toUpperCase()) : e.key;
     const half = Math.max(80, this.viewH / 2), page = Math.max(100, this.viewH - 80);
+    if (this.outline) {
+      const hs = this.headings();
+      if (e.key === "j" || e.key === "down") this.oi = Math.min(this.oi + 1, hs.length - 1);
+      else if (e.key === "k" || e.key === "up") this.oi = Math.max(this.oi - 1, 0);
+      else if (e.key === "enter") { this.outline = false; if (hs[this.oi] !== undefined) { this.cursor = hs[this.oi]; this.aimAt(hs[this.oi]); } }
+      else if (e.key === "escape" || e.key === "o") this.outline = false;
+      return cx.notify();
+    }
     this.flash = null;
     if (mod.control) {
       const c = { d: half, u: -half, f: page, b: -page }[e.key];
@@ -572,8 +708,13 @@ export default class Md extends View {
       case "space": case "pagedown": return this.moveBy(page, cx);
       case "pageup": return this.moveBy(-page, cx);
       case "G": to = this.move(this.blocks.length, -1); break;
-      case "}": case "]": to = this.heading(1); break;
-      case "{": case "[": to = this.heading(-1); break;
+      case "}": to = this.heading(1); break;
+      case "{": to = this.heading(-1); break;
+      case "]": return this.stepChange(1, cx);
+      case "[": return this.stepChange(-1, cx);
+      case "c": this.changed = new Set(); this.removed = new Map(); return cx.notify();
+      case "o": { const hs = this.headings(), cur = this.sectionOf(this.cursor); this.oi = Math.max(0, hs.indexOf(cur)); this.outline = true; return cx.notify(); }
+      case "backspace": return this.back(cx);
       case "g": case "z": this.pending = k; return;
       case "V": case "v": this.anchor = this.anchor === null ? this.cursor : null; return cx.notify();
       case "y": this.yank(); this.anchor = null; return cx.notify();
@@ -614,11 +755,15 @@ export default class Md extends View {
           .child(v_flex().id("md-col").w_full().max_w(MAX_W).px(PAD).pt(TOP).pb(80)
             .on_size_change((size, cx) => { const w = Math.max(120, size.width / Z() - PAD * 2); if (Math.abs(w - this.colW) > 1) { this.colW = w; cx.notify(); } }).font_family(BODY()).text_size(SIZE.body).line_height(1.65)
             .when(Boolean(this.error), el => el.child(div().text_color(t.blocked).child(this.error)))
-            .children(this.blocks.map((tok, i) => this.row(tok, i, t))))))
+            .children(this.blocks.map((tok, i) => this.row(tok, i, t)))
+            .when(this.removed.has(this.blocks.length), el => el.child(this.removedMark(this.removed.get(this.blocks.length), t))))))
+      .when(this.outline, el => el.child(this.outlinePanel(t)))
       .when(thumbH > 0, el => el.child(div().absolute().right(3).w(6).rounded(3).bg(t.border).top(thumbY).h(thumbH).transition("top", { duration: this.motion, easing: "ease-out" })))
       .child(h_flex().absolute().bottom(8).left(12).gap(10).items_center().text_size(12).font_family(BODY())
         .when(this.anchor !== null, el => el.child(div().px(8).py(1).rounded(4).bg(t.accent).text_color(t.accent_foreground).font_semibold().child("VISUAL")))
         .when(Boolean(this.pending || this.count), el => el.child(div().text_color(t.dim).child(this.count + this.pending)))
+        .when(this.changed.size > 0 && !this.flash, el => el.child(div().px(8).py(1).rounded(4).bg(t.surface).text_color(t.ansi2).child(`${this.changed.size} changed · ] [ · c`)))
+        .when(this.history.length > 0, el => el.child(div().text_color(t.dim).child("⌫ back")))
         .when(Boolean(this.flash), el => el.child(div().px(8).py(1).rounded(4).bg(t.surface).text_color(t.ansi2).child(this.flash))))
       .when(this.searching, el => el.child(h_flex().absolute().top(10).right(20).w(340).h(38).px(10).gap(8).items_center()
         .rounded(10).bg(t.popover).border_1().border_color(this.typing ? t.accent : t.input).shadow_md()
