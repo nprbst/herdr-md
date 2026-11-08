@@ -120,7 +120,7 @@ export default class Md extends View {
           if ([...this.folded].some(i => this.blocks[i]?.type !== "heading")) this.folded.clear();
           this.refold(); this.search(this.query);
           this.cursor = Math.min(this.cursor, Math.max(0, this.blocks.length - 1)); this.anchor = null;
-          this.resolve(); this.applyFocus();
+          this.highlightAimed = false; this.resolve(); this.applyFocus();
           await this.markChanges();
           if (this.pendingAnchor !== null) { this.jumpAnchor(this.pendingAnchor); this.pendingAnchor = null; }
           else if (this.restore) { this.cursor = Math.min(this.restore.cursor, this.blocks.length - 1); this.aimAt(this.cursor); this.restore = null; }
@@ -182,7 +182,9 @@ export default class Md extends View {
     this.changed = changed; this.removed = removed; this.lastHashes = hashes; this.ci = -1;
     exec("sh", ["-c", 'mkdir -p "$1" && printf %s "$2" > "$3"', "seen", NOTES(), JSON.stringify(hashes), seen]);
     // Glide to the first change, unless an agent highlight is taking the view.
-    if (changed.size && this.aim === null && this.pendingAnchor === null && !this.restore) {
+    // (aim alone isn't enough: it stays set after any glide until the person scrolls.)
+    const busy = this.highlightAimed; this.highlightAimed = false;
+    if (changed.size && !busy && this.pendingAnchor === null && !this.restore) {
       const first = Math.min(...changed); this.cursor = first; this.aimAt(first);
       this.flash = `${changed.size} changed${fresh ? "" : " since you last looked"} · ] next · c clear`;
     }
@@ -274,7 +276,7 @@ export default class Md extends View {
   // Jump to the highlight the last `mdh` call asked for, once the document is loaded.
   applyFocus() {
     if (this.pendingFocus === null || !this.blocks.length) return;
-    this.aimAt(this.notes.highlights[this.pendingFocus]?.blocks?.[0]); this.pendingFocus = null;
+    this.aimAt(this.notes.highlights[this.pendingFocus]?.blocks?.[0]); this.pendingFocus = null; this.highlightAimed = true;
   }
 
   // Map each highlight to the blocks it covers: by source lines, or by quoted text.

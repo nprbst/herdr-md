@@ -4,3 +4,4 @@ node_modules/
 mods/herdr-md/gpui-kit.d.ts
 mods/herdr-md/jsconfig.json
 .DS_Store
+HANDOFF.md
