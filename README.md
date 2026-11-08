@@ -114,7 +114,7 @@ block). For Claude Code there's a ready skill in
 | `{` `}` | previous / next heading |
 | `]` `[` · `c` | next / previous changed block · clear the change marks |
 | `o` | outline (`j`/`k`, `Enter`, `Esc`) |
-| `Backspace` | back after following a link |
+| `Backspace` | back after following a link (web links open in your browser; local non-markdown files are only shown in Finder, never launched) |
 | `zz` · `za` `zc` `zo` · `zM` `zR` | center · toggle/close/open fold · fold/unfold all |
 | `V` then `j`/`k` | select blocks |
 | `y` | copy the selection's markdown source |
