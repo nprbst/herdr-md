@@ -251,7 +251,7 @@ export default class Md extends View {
     if (push) this.history.push({ file: this.file, cursor: this.cursor });
     if (file === this.file) { if (frag) this.jumpAnchor(frag); return cx.notify(); }
     this.file = file.replace(/\/[^/]+\/\.\.\//g, "/");
-    this.folded.clear(); this.offset = 0; this.motion = 0; this.cursor = 0; this.anchor = null; this.heights = [];
+    this.folded.clear(); this.offset = 0; this.motion = 0; this.cursor = 0; this.anchor = null;   // heights kept: see load()
     this.lastHashes = null; this.changed = new Set(); this.removed = new Map(); this.seq = null; this.aim = null;
     this.pendingAnchor = frag;
     this.load(cx); this.watch(cx); this.readNotes(cx);
