@@ -8,12 +8,14 @@
   mdh focus FILE N                              scroll to highlight N (1-based)
   mdh clear FILE                                remove all highlights
   mdh show FILE                                 print current highlights
+  mdh video FILE [N] play|pause|toggle [T]      play or pause video N (1-based, default 1) in FILE
+  mdh video FILE [N] seek T                     jump to time T (seconds or m:ss); keeps playing or paused
   mdh sel                                       print what the person last sent from the viewer
                                                 (V to select, p to pin): file, lines, text
 
 The viewer watches ~/.cache/herdr-md/ and redraws and scrolls when a file there changes.
-Viewer keys: j/k move the cursor, V visual select, y copy, p pin for Claude, Enter fold/follow, za fold,
-/ search, n/N next match or highlight, # line numbers, ? key help, q close.
+Viewer keys: j/k move the cursor, V visual select, y copy, p pin for Claude, Enter fold/follow/zoom/play,
+O open a video in QuickTime, za fold, / search, n/N next match or highlight, # line numbers, ? key help, q close.
 """
 import argparse, json, os, re, subprocess, sys, time
 
@@ -52,6 +54,7 @@ def main():
     f = sub.add_parser("focus"); f.add_argument("file"); f.add_argument("n", type=int)
     c = sub.add_parser("clear"); c.add_argument("file")
     s = sub.add_parser("show"); s.add_argument("file")
+    v = sub.add_parser("video"); v.add_argument("file"); v.add_argument("args", nargs="+")
     sub.add_parser("sel")
     a = p.parse_args()
     if a.cmd == "sel":
@@ -86,6 +89,25 @@ def main():
         marks.append(mark)
         save(path, {"highlights": marks}, focus=len(marks) - 1)
         print(f"highlight {len(marks)} of {len(marks)} on {path}")
+    elif a.cmd == "video":
+        rest = list(a.args)
+        n = int(rest.pop(0)) if rest and rest[0].isdigit() else 1
+        if not rest or rest[0] not in ("play", "pause", "toggle", "seek"):
+            sys.exit("mdh: video FILE [N] play|pause|toggle|seek [T]")
+        cmd = {"n": n - 1, "state": rest[0], "seq": time.time_ns()}
+        if len(rest) > 1:
+            m, _, sec = rest[1].rpartition(":")
+            cmd["t"] = int(m or 0) * 60 + float(sec)
+        elif cmd["state"] == "seek":
+            sys.exit("mdh: seek needs a time: 12, 0:12 or 1:05.5")
+        # Its own seq: a video command doesn't re-run the highlight glide.
+        state["video"] = cmd
+        os.makedirs(DIR, exist_ok=True)
+        tmp = key(path) + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(state, f, indent=1)
+        os.replace(tmp, key(path))
+        print(f"video {n} {cmd['state']}" + (f" at {cmd['t']:g}s" if "t" in cmd else "") + f" in {path}")
     elif a.cmd == "focus":
         save(path, state, focus=a.n - 1)
     elif a.cmd == "clear":

@@ -5,3 +5,9 @@ Press Enter on the diagram or an image to zoom it: `hjkl` or drag to pan, `+` `-
 ## A GIF
 
 ![The outline, in the launch video](outline.gif)
+
+## A video
+
+Enter plays and pauses it, `O` opens it in QuickTime. An agent can drive it too: `mdh video demo/media.md play`.
+
+![Mermaid, in your theme](clip.mp4)

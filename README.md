@@ -47,14 +47,20 @@ runs `npm install` in its `render/` folder the first time it meets a formula or
 diagram, about 400 MB with Mermaid's tooling) and, for Mermaid only, an
 installed Chrome, Chromium, Brave or Edge (none is downloaded; set
 `CHROME_PATH` if yours is elsewhere). Without them everything else works and
-figures show their source. Built and tested on macOS; image sizing (`sips`) and
+figures show their source. Videos need `ffmpeg` (Homebrew's is found).
+Built and tested on macOS; image sizing (`sips`) and
 copy (`pbcopy`) are macOS tools.
 
-**What it runs:** `node`/`npm` (renderers), `cp`, `mkdir`, `sips`, `pbcopy`. It
+**What it runs:** `node`/`npm` (renderers), `ffmpeg`/`ffprobe` (video frames), `cp`, `mkdir`, `sips`, `pbcopy`. It
 reads the file you open and the images it links, writes only inside its own
 folder (`.cache/`) and `~/.cache/herdr-md/` (highlights and your selection),
 and fetches nothing from the network except that one-time `npm install`.
 Remote images in documents are never fetched.
+
+**Media:** GIFs animate. A local `![](clip.mp4)` (or `.mov`, `.m4v`, `.webm`)
+plays inline with no sound: the first 20 s at 10 fps, at most 720 px wide,
+as JPEG frames cached in `.cache/v/`. Enter plays it, `O` hands the file to
+QuickTime Player. See [`demo/media.md`](demo/media.md).
 
 Try it on the bundled tour: `mdh open demo/tour.md`.
 
@@ -97,6 +103,8 @@ mdh hl FILE --text "a phrase from the doc" --color green  # matches the block co
 mdh hl FILE --lines 90 --add --color red                  # --add keeps the earlier ones
 mdh focus FILE 2 · mdh clear FILE · mdh show FILE
 mdh sel                                                   # what the person pinned with V … p
+mdh video FILE [N] play|pause|toggle [0:12]               # video N (1-based, default 1)
+mdh video FILE [N] seek 0:12                              # jump; keeps playing or paused
 ```
 
 Notes are markdown. Colors: yellow (default), green, red, blue, purple, cyan.
@@ -120,7 +128,8 @@ block). For Claude Code there's a ready skill in
 | `V` then `j`/`k` | select blocks |
 | `y` | copy the selection's markdown source |
 | `p` | pin the selection for the agent (`mdh sel` reads it) |
-| `Enter` | fold the heading, follow the first link in the block, or zoom a diagram or image |
+| `Enter` | fold the heading, follow the first link in the block, zoom a diagram or image, or play/pause a video |
+| `O` | open the video under the cursor in QuickTime Player |
 | in a zoomed figure: `h` `j` `k` `l` or drag or scroll · `+` `-` or ctrl-scroll · `0` · `Esc` | pan · zoom (about the pointer) · fit · close |
 | `/` then `Enter` / `Shift-Enter`, `n` `N` | search; next / previous match (or highlight) |
 | `#` | line numbers on/off |

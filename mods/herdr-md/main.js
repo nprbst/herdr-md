@@ -44,12 +44,72 @@ const HELP = [[
     ["ctrl-d ctrl-u", "half page down / up"], ["ctrl-f ctrl-b", "page down / up"], ["space", "page down"], ["ctrl-e ctrl-y", "scroll a line, cursor stays"], ["zz", "center the cursor"]]],
   ["SHARE", [["V", "select blocks"], ["y", "copy the markdown source"], ["p", "pin the selection for Claude"], ["Esc", "unselect, close search, unpin"]]],
 ], [
-  ["READ", [["o", "outline"], ["Enter", "fold a heading, follow a link, zoom a figure"], ["Backspace", "back after a link"],
+  ["READ", [["o", "outline"], ["Enter", "fold a heading, follow a link, zoom a figure, play a video"], ["O", "open a video in QuickTime"], ["Backspace", "back after a link"],
     ["za zc zo", "toggle / close / open fold"], ["zM zR", "fold / unfold all"], ["] [", "next / previous change"], ["c", "clear change marks"],
     ["/", "search"], ["n N", "next / previous match or note"], ["#", "line numbers"]]],
   ["ZOOM (Enter on a diagram or image)", [["h j k l", "pan (or drag, or scroll)"], ["+ -", "zoom in / out (or ctrl-scroll)"], ["0", "fit"], ["Esc", "close"]]],
   ["VIEWER", [["? h", "this help"], ["q", "close the viewer"]]],
 ]];
+// Local video blocks: ![](clip.mp4) becomes a JPEG frame sequence (ffmpeg) in
+// .cache/v/<hash>/, played by a nested view that swaps frames on a timer.
+// Capped at the first VIDEO_MAX seconds, VIDEO_FPS frames a second, VIDEO_W px wide.
+const isVideo = href => /\.(mp4|mov|m4v|webm)$/i.test(href.split(/[?#]/)[0]);
+const VIDEO_FPS = 10, VIDEO_MAX = 20, VIDEO_W = 720;
+const clock = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+class Video extends View {
+  init(p, cx) {
+    this.p = p; this.i = 0; this.playing = false; this.seq = null;
+    // One clock for the view's life; it does nothing while paused.
+    // Frames follow the wall clock (the timer only polls), so a slow render
+    // drops a frame instead of slowing the clip down.
+    cx.timer.every(1000 / VIDEO_FPS / 3, cx => {
+      if (!this.playing) return;
+      const n = this.p.meta.n, i = Math.min(n - 1, Math.floor((Date.now() - this.t0) * VIDEO_FPS / 1000));
+      if (i === this.i && i < n - 1) return;
+      this.i = i; if (i >= n - 1) this.playing = false;
+      cx.notify();
+    });
+  }
+
+  // Commands from the viewer (Enter, mdh video): { state: toggle|play|pause|seek, t, seq }.
+  update(p) {
+    this.p = p; const c = p.cmd;
+    if (!c || c.seq === this.seq) return;
+    this.seq = c.seq;
+    const n = p.meta.n, at = t => Math.max(0, Math.min(n - 1, Math.round(t * VIDEO_FPS)));
+    if (typeof c.t === "number") this.i = at(c.t);
+    if (c.state === "toggle") this.setPlaying(!this.playing);
+    else if (c.state === "play") this.setPlaying(true, typeof c.t !== "number");
+    else if (c.state === "pause") this.playing = false;
+    else if (c.state === "seek") this.setPlaying(this.playing, false);
+  }
+
+  // Playing from the last frame starts over (unless a time was given).
+  setPlaying(on, rewind = true) {
+    if (on && rewind && this.i >= this.p.meta.n - 1) this.i = 0;
+    this.playing = on; this.t0 = Date.now() - this.i * 1000 / VIDEO_FPS;
+  }
+
+  render(cx) {
+    const { dir, meta, w, h, t } = this.p, n = meta.n;
+    const frame = i => `${dir}/f${String(Math.max(0, Math.min(n - 1, i)) + 1).padStart(4, "0")}.jpg`;
+    const pic = i => image(frame(i)).absolute().top(0).left(0).w(w).h(h);
+    // Next frame at the bottom (so it decodes before it's needed), previous frame
+    // under the current one (shown if the current one hasn't decoded yet).
+    const shown = Math.min(meta.dur, VIDEO_MAX), cut = meta.dur > VIDEO_MAX + 0.5;
+    return div().id("video").relative().w(w).h(h).rounded(8).overflow_hidden().bg("#000000").cursor_pointer()
+      .on_click((_e, cx) => { this.setPlaying(!this.playing); cx.notify(); })
+      .child(pic(this.i + 1)).child(pic(this.i - 1)).child(pic(this.i))
+      .child(div().absolute().left(0).bottom(0).h(3).bg(t.accent).w(n > 1 ? w * this.i / (n - 1) : 0))
+      .child(h_flex().absolute().left(8).bottom(8).gap(8).items_center().px(8).py(1).rounded(6).bg("#000000aa").text_size(12).text_color("#ffffff")
+        .child(div().child(this.playing ? "❚❚" : "▶"))
+        .child(div().child(`${clock(this.i / VIDEO_FPS)} / ${clock(shown)}${cut ? " (first " + VIDEO_MAX + "s)" : ""}`)))
+      .when(!this.playing, el => el.child(h_flex().absolute().top(0).left(0).w(w).h(h).items_center().justify_center()
+        .child(h_flex().w(56).h(56).rounded(28).bg("#000000aa").items_center().justify_center().text_size(22).text_color("#ffffff").child("▶"))));
+  }
+}
+
 const MODIFIER_KEYS = ["shift", "control", "alt", "platform", "function", "capslock"];
 // The app only loads images from its own folder, so local images are copied
 // here first. Hidden folder: saving into it doesn't hot-reload the mod.
@@ -96,7 +156,7 @@ function blocks(src, tokens) {
 export default class Md extends View {
   init(_props, cx) {
     this.file = props()?.file ?? null;
-    this.blocks = []; this.error = null; this.codes = []; this.images = {}; this.figs = {};
+    this.blocks = []; this.error = null; this.codes = []; this.images = {}; this.figs = {}; this.videos = {}; this.videoList = []; this.born = Date.now() * 1e6; this.videoSeq = null; this.pendingVideo = null;
     this.noteAlpha = 1; this.typed = Infinity;
     this.offset = 0; this.motion = 0; this.heights = []; this.viewH = 0; this.contentH = 0; this.colW = MAX_W - PAD * 2;
     this.notes = { highlights: [] }; this.seq = null; this.pendingFocus = null; this.aim = null;
@@ -152,6 +212,8 @@ export default class Md extends View {
           this.reaim();
           cx.notify();
           await this.loadImages(tokens);
+          cx.notify();
+          await this.loadVideos(tokens, cx);
           cx.notify();
           await this.renderFigures(tokens);
         }
@@ -279,6 +341,10 @@ export default class Md extends View {
     let n = null;
     try { n = JSON.parse(await readTextFile(`${NOTES()}/${noteKey(this.file)}`) ?? "null"); } catch {}
     this.notes = n && Array.isArray(n.highlights) ? n : { highlights: [] };
+    // A video command (mdh video) has its own seq. One written before this viewer
+    // opened is stale and ignored.
+    const vc = n?.video;
+    if (vc && vc.seq !== this.videoSeq) { this.videoSeq = vc.seq; if (vc.seq > this.born) { this.pendingVideo = vc; this.applyVideo(cx); } }
     if (n && n.seq !== this.seq) { this.seq = n.seq; this.pendingFocus = n.focus ?? (n.highlights.length ? 0 : null); this.animateNotes(cx); }
     this.resolve();
     this.applyFocus();
@@ -404,7 +470,7 @@ export default class Md extends View {
 
   async loadImages(tokens) {
     const srcs = [];
-    marked.walkTokens(tokens, tok => { if (tok.type === "image" && !this.images[tok.href]) srcs.push(tok.href); });
+    marked.walkTokens(tokens, tok => { if (tok.type === "image" && !isVideo(tok.href) && !this.images[tok.href]) srcs.push(tok.href); });
     await exec("mkdir", ["-p", `${home()}/.config/herdr-app/${CACHE}`]);
     for (const href of [...new Set(srcs)]) {
       if (/^[a-z]+:\/\//i.test(href)) { this.images[href] = { remote: true }; continue; }
@@ -419,6 +485,74 @@ export default class Md extends View {
       if (mw && mh) { w = +mw[1]; h = +mh[1]; }
       this.images[href] = { path: `${CACHE}/${name}`, w, h };
     }
+  }
+
+  // Videos: extract frames once per file version (path, mtime and size), then
+  // make one nested Video view per clip. this.videoList is document order (mdh video N).
+  async loadVideos(tokens, cx) {
+    const hrefs = [];
+    marked.walkTokens(tokens, tok => { if (tok.type === "image" && isVideo(tok.href)) hrefs.push(tok.href); });
+    this.videoList = [...new Set(hrefs)];
+    for (const href of this.videoList) {
+      const v = this.videos[href] ??= {};
+      if (/^[a-z]+:\/\//i.test(href)) { v.remote = true; continue; }
+      v.abs = href.startsWith("/") ? href : `${dirname(this.file)}/${decodeURIComponent(href)}`;
+      const st = await exec("stat", ["-f", "%m:%z", v.abs]);
+      if (st.code !== 0) { v.missing = true; continue; }
+      const key = fnv(v.abs + st.stdout.trim()), dir = `${CACHE}/v/${key}`, absDir = `${home()}/.config/herdr-app/${dir}`;
+      if (v.dir === dir && v.meta) continue;
+      v.dir = dir; v.meta = null; v.missing = false; v.error = null; cx.notify();
+      let meta = null;
+      try { meta = JSON.parse(await readTextFile(`${absDir}/meta.json`) ?? "null"); } catch {}
+      if (!meta) {
+        const r = await exec("sh", ["-c", `PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"; set -e; d="$1"; rm -rf "$d.tmp"; mkdir -p "$d.tmp"
+          ffmpeg -v error -y -t ${VIDEO_MAX} -i "$2" -an -vf "fps=${VIDEO_FPS},scale='min(iw,${VIDEO_W})':-2" -q:v 4 "$d.tmp/f%04d.jpg"
+          n=$(ls "$d.tmp" | grep -c jpg); wh=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0:s=, "$d.tmp/f0001.jpg")
+          dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$2")
+          printf '{"n":%s,"w":%s,"h":%s,"dur":%s}' "$n" "\${wh%%,*}" "\${wh##*,}" "\${dur:-0}" > "$d.tmp/meta.json"; rm -rf "$d"; mv "$d.tmp" "$d"; cat "$d/meta.json"`, "video", absDir, v.abs]);
+        try { meta = JSON.parse(r.stdout); } catch { v.error = (r.stderr || "ffmpeg failed (is it installed?)").trim().split("\n").pop().slice(0, 160); cx.notify(); continue; }
+      }
+      v.meta = meta;
+      const props = this.videoProps(v);
+      if (v.entity) v.entity.set_props(props); else v.entity = cx.new(Video, props);
+      this.applyVideo(cx);
+      cx.notify();
+    }
+  }
+
+  videoSize(v) {
+    let w = Math.min(v.meta.w, this.colW), h = Math.round(v.meta.h * w / v.meta.w);
+    if (h > 560) { w = Math.round(w * 560 / h); h = 560; }
+    return { w, h };
+  }
+
+  videoProps(v, cmd) { return { dir: v.dir, meta: v.meta, ...this.videoSize(v), t: theme(), cmd: cmd ?? v.cmd }; }
+
+  applyVideo(cx) {
+    const c = this.pendingVideo; if (!c) return;
+    if (this.videoCmd(c.n ?? 0, c.state, c.t, cx)) {
+      this.pendingVideo = null;
+      const b = this.blocks.findIndex(x => this.blockVideo(x) === (c.n ?? 0));
+      if (b >= 0 && !this.onScreen(b)) { this.cursor = b; this.aimAt(b); }
+    }
+  }
+
+  // Send a play/pause/seek command to video n (0-based, document order).
+  videoCmd(n, state, t, cx) {
+    const v = this.videos[this.videoList?.[n]]; if (!v?.entity) return false;
+    v.cmd = { state, t, seq: (v.cmd?.seq ?? 0) + 1 }; v.entity.set_props(this.videoProps(v)); cx.notify(v.entity);
+    return true;
+  }
+
+  resizeVideos() { for (const v of Object.values(this.videos)) if (v.entity && v.meta) v.entity.set_props(this.videoProps(v)); }
+
+  videoBlock(tok, t) {
+    const v = this.videos[tok.href];
+    const note = v?.remote ? "remote video not fetched" : v?.missing ? "not found" : v?.error ? `couldn't prepare: ${v.error}` : "preparing frames…";
+    if (!v?.entity || !v.meta) return div().my(6).px(12).py(8).rounded(6).bg(t.surface).text_color(v?.error ? t.blocked : t.dim).text_size(13)
+      .child(`▶  ${tok.text || tok.href} · ${note}`);
+    return v_flex().my(8).gap(6).items_center().child(v.entity)
+      .child(div().text_size(13).text_color(t.dim).italic().child(`${tok.text ? tok.text + " · " : ""}Enter plays · O opens in QuickTime`));
   }
 
   figKey(tok) {
@@ -490,6 +624,7 @@ export default class Md extends View {
   }
 
   picture(tok, id, t) {
+    if (isVideo(tok.href)) return this.videoBlock(tok, t);
     const img = this.images[tok.href];
     if (!img?.path) return div().my(6).px(12).py(8).rounded(6).bg(t.surface).text_color(t.dim).text_size(13)
       .child(`🖼  ${tok.text || tok.href}${img?.remote ? " (remote image not fetched)" : img?.missing ? " (not found)" : ""}`);
@@ -651,10 +786,26 @@ export default class Md extends View {
   activate(cx) {
     const b = this.blocks[this.cursor]; if (!b) return;
     if (b.type === "heading") { this.toggleFold(this.cursor); return cx.notify(); }
+    const vid = this.blockVideo(b);
+    if (vid >= 0) { this.videoCmd(vid, "toggle", undefined, cx); return; }
     if (this.openZoom(b, cx)) return;
     const m = /\[[^\]]*\]\(([^)\s]+)[^)]*\)/.exec(b.raw);
     if (m) return this.follow(m[1], cx);
     this.flash = "Enter: fold a heading, follow a link or zoom a figure · p pins for Claude"; cx.notify();
+  }
+
+  // The index in this.videoList of the first video in block b, or -1.
+  blockVideo(b) {
+    const im = b?.type === "paragraph" ? b.tokens.find(x => x.type === "image" && isVideo(x.href)) : null;
+    return im ? this.videoList.indexOf(im.href) : -1;
+  }
+
+  // O: open the clip in QuickTime Player. Only video files reach this, and only
+  // that app is asked to open them, so a document can't launch anything else.
+  openVideo(cx) {
+    const v = this.videos[this.videoList[this.blockVideo(this.blocks[this.cursor])]];
+    if (!v?.abs || v.missing) { this.flash = "O: put the cursor on a video"; return cx.notify(); }
+    exec("open", ["-a", "QuickTime Player", v.abs]); this.flash = "opened in QuickTime Player"; cx.notify();
   }
 
   // ---- zoom: Enter on a diagram or image fills the pane with it ----
@@ -943,6 +1094,7 @@ export default class Md extends View {
         else { this.picked = null; exec("rm", ["-f", `${NOTES()}/selection.json`]); }
         return cx.notify();
       case "#": this.numbers = !this.numbers; return cx.notify();
+      case "O": return this.openVideo(cx);
       case "/": return this.openSearch(cx);
       case "?": case "h": return this.openHelp(cx);
       case "q": { const me = panes().find(p => p.focused && p.mod === MOD); if (me) run("pane.close", { pane: me.pane }); return; }
@@ -975,7 +1127,7 @@ export default class Md extends View {
           .on_size_change((size, cx) => { this.contentH = size.height / Z(); this.reaim(); cx.notify(); })
           .child(h_flex().w_full().justify_center()
             .child(v_flex().id("md-col").w_full().max_w(MAX_W).px(PAD).pt(TOP).pb(80)
-              .on_size_change((size, cx) => { const w = Math.max(120, size.width / Z() - PAD * 2); if (Math.abs(w - this.colW) > 1) { this.colW = w; cx.notify(); } }).font_family(BODY()).text_size(SIZE.body).line_height(1.65)
+              .on_size_change((size, cx) => { const w = Math.max(120, size.width / Z() - PAD * 2); if (Math.abs(w - this.colW) > 1) { this.colW = w; this.resizeVideos(); cx.notify(); } }).font_family(BODY()).text_size(SIZE.body).line_height(1.65)
               .when(Boolean(this.error), el => el.child(div().text_color(t.blocked).child(this.error)))
               .children(this.blocks.map((tok, i) => this.row(tok, i, t)))
               .when(this.removed.has(this.blocks.length), el => el.child(this.removedMark(this.removed.get(this.blocks.length), t))))))
