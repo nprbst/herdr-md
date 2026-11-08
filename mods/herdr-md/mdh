@@ -9,10 +9,10 @@
   mdh clear FILE                                remove all highlights
   mdh show FILE                                 print current highlights
   mdh sel                                       print what the person last sent from the viewer
-                                                (V to select, Enter to send): file, lines, text
+                                                (V to select, p to pin): file, lines, text
 
 The viewer watches ~/.cache/herdr-md/ and redraws and scrolls when a file there changes.
-Viewer keys: j/k move the cursor, V visual select, y copy, Enter send to Claude, za fold,
+Viewer keys: j/k move the cursor, V visual select, y copy, p pin for Claude, Enter fold/follow, za fold,
 / search, n/N next match or highlight, # line numbers.
 """
 import argparse, json, os, re, subprocess, sys, time
@@ -59,7 +59,7 @@ def main():
             with open(os.path.join(DIR, "selection.json")) as f:
                 print(json.dumps(json.load(f), indent=1))
         except OSError:
-            sys.exit("mdh: nothing selected (in the viewer: V, move, Enter)")
+            sys.exit("mdh: nothing pinned (in the viewer: V, move, p)")
         return
     path = os.path.abspath(os.path.expanduser(a.file))
 

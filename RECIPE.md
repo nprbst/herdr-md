@@ -28,7 +28,7 @@ to them, and reads back what the person selected.
 - Reloads when the file changes (`watchFolder` on its folder); highlights reapply.
 - Highlights come from `~/.cache/herdr-md/<path-key>.json` (`{seq, focus, highlights: [{lines:[a,b]} | {text}, note?, color?]}`), written by the bundled `mdh` script and watched by the pane. A new `seq` glides to the focused highlight, unfolding sections that hide it.
 - Scrolling is the mod's own viewport: content is absolutely positioned at `top(-offset)` with `.transition("top", …)`: 320ms ease-in-out for jumps (highlights, search, headings, gg/G), 120ms for cursor steps, 60ms for wheel ticks, 200ms for half pages.
-- Keys (with `"focusable": true`): `j/k` (counts), `gg/G`, `ctrl-d/u/f/b`, `space`, `{ }`/`[ ]`, `zz`, `za/zc/zo/zM/zR`, `V`, `y` (copy source via `pbcopy`), `Enter` (write `~/.cache/herdr-md/selection.json`), `/` search with `Enter`/`Shift-Enter`, `n/N`, `#`, `Esc`. A click puts the cursor on that block; clicking a heading folds it.
+- Keys (with `"focusable": true`): `j/k` (counts), `gg/G`, `ctrl-d/u/f/b`, `space`, `{ }`/`[ ]`, `zz`, `za/zc/zo/zM/zR`, `V`, `y` (copy source via `pbcopy`), `p` (pin: write `~/.cache/herdr-md/selection.json`), `Enter` (fold a heading or follow its first link), `/` search with `Enter`/`Shift-Enter`, `n/N`, `#`, `Esc`. A click puts the cursor on that block; clicking a heading folds it.
 - Figures render in one batch per load through `node render/render.mjs '<jobs JSON>'`; the first time, the mod runs `npm install` there. Outputs are cached by a hash of source and colors, so a theme change re-renders once.
 
 ## Built from
@@ -56,6 +56,6 @@ to them, and reads back what the person selected.
 - `$$\hat{y} = w_1 x_1 + b$$` shows typeset subscripts; inline `$\mathbf{x}^{(i)}$` shows `x⁽ⁱ⁾`; `$5 and $10` stays text.
 - A ` ```mermaid ` flowchart renders as a picture.
 - `mdh hl FILE --lines N --note "x"` glides to line N, tints it and shows the note; `mdh clear` removes it.
-- `V j Enter` in the pane, then `mdh sel`, prints that file and line range.
+- `V j p` in the pane, then `mdh sel`, prints that file and line range.
 - `/` + a word tints matching blocks and `Enter` moves between them; clicking a heading folds its section.
 - Leaving the pane with the leader prefix (`ctrl-space h`) moves the keyboard on the first press.

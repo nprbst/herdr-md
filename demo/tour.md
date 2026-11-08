@@ -19,7 +19,7 @@ tables all render the way you'd expect.
 | Key | Does |
 |---|---|
 | `j` / `k` | move the block cursor |
-| `V`, `y`, `Enter` | select, copy, send to the agent |
+| `V`, `y`, `p` | select, copy, pin for the agent |
 | `]` / `[` | jump between changed blocks |
 | `o` | outline |
 
@@ -49,7 +49,7 @@ flowchart LR
 
 ## Pointing back
 
-Select a few blocks with `V` and `j`, press `Enter`, then ask your agent
+Select a few blocks with `V` and `j`, press `p` to pin them, then ask your agent
 "what about this?" It runs `mdh sel` and sees exactly what you meant:
 the file, the line range and the markdown source.
 

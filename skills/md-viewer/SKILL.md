@@ -29,7 +29,7 @@ mdh show FILE                                   # current highlights as JSON
   user steps through them with `n` / `N` in the viewer.
 - Pass FILE as an absolute path, or relative to your current directory; it must be the same file the
   viewer shows.
-- **The person can point back.** In the viewer they select blocks (`V`, `j`/`k`) and press `Enter`;
-  the selection turns blue. When they say "this", "what I selected", "the part I highlighted" or
+- **The person can point back.** In the viewer they select blocks (`V`, `j`/`k`) and press `p`;
+  the selection turns blue and is labeled "Pinned for Claude". When they say "this", "what I selected", "the part I highlighted" or
   similar, run `mdh sel` first: it prints `{file, lines, text}` of their last selection.
 - State lives in `~/.cache/herdr-md/`. The viewer only reads files on this Mac.

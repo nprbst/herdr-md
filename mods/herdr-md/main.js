@@ -569,6 +569,8 @@ export default class Md extends View {
     return v_flex().id(`row-${i}`).relative()
       .on_mouse_down("left", (_e, cx) => { this.cursor = i; this.handle.focus(); cx.notify(); })
       .when(Boolean(gone), el => el.child(this.removedMark(gone, t)))
+      .when(Boolean(picked) && i === this.picked[0], el => el.child(h_flex().mb(2).gap(6).items_center().text_size(11).text_color(t.ansi4)
+        .child(div().child("📌 Pinned for Claude")).child(div().text_color(t.dim).child("· Esc unpins"))))
       .when(changed, el => el.child(div().absolute().left(-12).top(gone ? 26 : 4).bottom(4).w(3).rounded(2).bg(t.ansi2)))
       .when(this.numbers, el => el.child(div().absolute().left(-PAD - 4).top(numTop).w(PAD - 14).text_right().font_family(BODY()).text_size(12).line_height(1.6)
         .text_color(cur ? t.accent : t.dim).when(cur, el => el.font_semibold()).child(String(tok.from))))
@@ -592,6 +594,15 @@ export default class Md extends View {
   removedMark(n, t) {
     return h_flex().gap(8).items_center().py(2).text_size(11).text_color(t.ansi1)
       .child(div().w(10).h(1).bg(t.ansi1)).child(div().child(`${n} block${n === 1 ? "" : "s"} removed`)).child(div().flex_1().h(1).bg(t.ansi1 + "55"));
+  }
+
+  // Enter: fold a heading, or follow the first link in the block.
+  activate(cx) {
+    const b = this.blocks[this.cursor]; if (!b) return;
+    if (b.type === "heading") { this.toggleFold(this.cursor); return cx.notify(); }
+    const m = /\[[^\]]*\]\(([^)\s]+)[^)]*\)/.exec(b.raw);
+    if (m) return this.follow(m[1], cx);
+    this.flash = "Enter: fold a heading or follow a link · p pins for Claude"; cx.notify();
   }
 
   // ---- outline ----
@@ -661,7 +672,7 @@ export default class Md extends View {
     const sel = this.selection();
     this.picked = this.range();
     exec("sh", ["-c", 'mkdir -p "$1" && printf %s "$2" > "$1/selection.json"', "share", NOTES(), JSON.stringify({ ...sel, at: new Date().toISOString() })]);
-    this.flash = `sent lines ${sel.lines[0]}–${sel.lines[1]} to Claude`;
+    this.flash = `📌 pinned lines ${sel.lines[0]}–${sel.lines[1]} for Claude · ask it about "this" · Esc unpins`;
   }
 
   keys(e, cx) {
@@ -722,7 +733,8 @@ export default class Md extends View {
       case "g": case "z": this.pending = k; return;
       case "V": case "v": this.anchor = this.anchor === null ? this.cursor : null; return cx.notify();
       case "y": this.yank(); this.anchor = null; return cx.notify();
-      case "enter": this.share(); this.anchor = null; return cx.notify();
+      case "p": this.share(); this.anchor = null; return cx.notify();
+      case "enter": return this.activate(cx);
       case "escape":
         if (this.anchor !== null) this.anchor = null;
         else if (this.searching) return this.closeSearch(cx);
@@ -742,40 +754,63 @@ export default class Md extends View {
   }
 
   // The heading whose section holds block i.
-  sectionOf(i) { for (let j = i; j >= 0; j--) if (this.blocks[j].type === "heading") return j; return null; }
+  sectionOf(i) { for (let j = Math.min(i, this.blocks.length - 1); j >= 0; j--) if (this.blocks[j]?.type === "heading") return j; return null; }
 
   render(cx) {
     const t = theme();
     const thumbH = this.contentH > this.viewH ? Math.max(30, this.viewH * this.viewH / this.contentH) : 0;
     const thumbY = thumbH ? (this.viewH - thumbH) * this.offset / (this.contentH - this.viewH) : 0;
-    return div().id("md").size_full().min_h(0).relative().overflow_hidden().bg(t.background).text_color(t.foreground)
+    return v_flex().id("md").size_full().min_h(0).bg(t.background).text_color(t.foreground)
       .track_focus(this.handle).on_key_down((e, cx) => this.keys(e, cx))
-      .on_size_change((size, cx) => { this.viewH = size.height / Z(); this.offset = this.clamp(this.offset); this.reaim(); cx.notify(); })
-      .on_scroll_wheel((e, cx) => this.scrollBy(-e.delta.y / Z(), cx))
-      .child(div().id("md-content").absolute().left(0).w_full().top(-this.offset)
-        .transition("top", { duration: this.motion, easing: this.motion === GLIDE ? "ease-in-out" : "ease-out" })
-        .on_size_change((size, cx) => { this.contentH = size.height / Z(); this.reaim(); cx.notify(); })
-        .child(h_flex().w_full().justify_center()
-          .child(v_flex().id("md-col").w_full().max_w(MAX_W).px(PAD).pt(TOP).pb(80)
-            .on_size_change((size, cx) => { const w = Math.max(120, size.width / Z() - PAD * 2); if (Math.abs(w - this.colW) > 1) { this.colW = w; cx.notify(); } }).font_family(BODY()).text_size(SIZE.body).line_height(1.65)
-            .when(Boolean(this.error), el => el.child(div().text_color(t.blocked).child(this.error)))
-            .children(this.blocks.map((tok, i) => this.row(tok, i, t)))
-            .when(this.removed.has(this.blocks.length), el => el.child(this.removedMark(this.removed.get(this.blocks.length), t))))))
-      .when(this.outline, el => el.child(this.outlinePanel(t)))
-      .when(thumbH > 0, el => el.child(div().absolute().right(3).w(6).rounded(3).bg(t.border).top(thumbY).h(thumbH).transition("top", { duration: this.motion, easing: "ease-out" })))
-      .child(h_flex().absolute().bottom(8).left(12).gap(10).items_center().text_size(12).font_family(BODY())
-        .when(this.anchor !== null, el => el.child(div().px(8).py(1).rounded(4).bg(t.accent).text_color(t.accent_foreground).font_semibold().child("VISUAL")))
-        .when(Boolean(this.pending || this.count), el => el.child(div().text_color(t.dim).child(this.count + this.pending)))
-        .when(this.changed.size > 0 && !this.flash, el => el.child(div().px(8).py(1).rounded(4).bg(t.surface).text_color(t.ansi2).child(`${this.changed.size} changed · ] [ · c`)))
-        .when(this.history.length > 0, el => el.child(div().text_color(t.dim).child("⌫ back")))
-        .when(Boolean(this.flash), el => el.child(div().px(8).py(1).rounded(4).bg(t.surface).text_color(t.ansi2).child(this.flash))))
-      .when(this.searching, el => el.child(h_flex().absolute().top(10).right(20).w(340).h(38).px(10).gap(8).items_center()
-        .rounded(10).bg(t.popover).border_1().border_color(this.typing ? t.accent : t.input).shadow_md()
-        .child(div().text_color(t.dim).text_size(14).child("⌕"))
-        .child(Input.new(this.input).flex_1().h(30).text_size(14).text_color(t.foreground).font_family(BODY()))
-        .child(div().text_size(12).text_color(this.query && !this.matches.length ? t.blocked : t.dim)
-          .child(this.query ? (this.matches.length ? `${this.mi + 1}/${this.matches.length}` : "none") : ""))
-        .child(div().id("md-search-close").px(4).cursor_pointer().text_color(t.dim).hover(s => s.text_color(t.foreground))
-          .on_click((_e, cx) => this.closeSearch(cx)).child("✕"))));
+      .child(this.headerBar(t))
+      .child(div().id("md-view").flex_1().min_h(0).relative().overflow_hidden()
+        .on_size_change((size, cx) => { this.viewH = size.height / Z(); this.offset = this.clamp(this.offset); this.reaim(); cx.notify(); })
+        .on_scroll_wheel((e, cx) => this.scrollBy(-e.delta.y / Z(), cx))
+        .child(div().id("md-content").absolute().left(0).w_full().top(-this.offset)
+          .transition("top", { duration: this.motion, easing: this.motion === GLIDE ? "ease-in-out" : "ease-out" })
+          .on_size_change((size, cx) => { this.contentH = size.height / Z(); this.reaim(); cx.notify(); })
+          .child(h_flex().w_full().justify_center()
+            .child(v_flex().id("md-col").w_full().max_w(MAX_W).px(PAD).pt(TOP).pb(80)
+              .on_size_change((size, cx) => { const w = Math.max(120, size.width / Z() - PAD * 2); if (Math.abs(w - this.colW) > 1) { this.colW = w; cx.notify(); } }).font_family(BODY()).text_size(SIZE.body).line_height(1.65)
+              .when(Boolean(this.error), el => el.child(div().text_color(t.blocked).child(this.error)))
+              .children(this.blocks.map((tok, i) => this.row(tok, i, t)))
+              .when(this.removed.has(this.blocks.length), el => el.child(this.removedMark(this.removed.get(this.blocks.length), t))))))
+        .when(thumbH > 0, el => el.child(div().absolute().right(3).w(6).rounded(3).bg(t.border).top(thumbY).h(thumbH).transition("top", { duration: this.motion, easing: "ease-out" })))
+        .when(this.outline, el => el.child(this.outlinePanel(t)))
+        .when(this.searching, el => el.child(h_flex().absolute().top(10).right(20).w(340).h(38).px(10).gap(8).items_center()
+          .rounded(10).bg(t.popover).border_1().border_color(this.typing ? t.accent : t.input).shadow_md()
+          .child(div().text_color(t.dim).text_size(14).child("⌕"))
+          .child(Input.new(this.input).flex_1().h(30).text_size(14).text_color(t.foreground).font_family(BODY()))
+          .child(div().text_size(12).text_color(this.query && !this.matches.length ? t.blocked : t.dim)
+            .child(this.query ? (this.matches.length ? `${this.mi + 1}/${this.matches.length}` : "none") : ""))
+          .child(div().id("md-search-close").px(4).cursor_pointer().text_color(t.dim).hover(s => s.text_color(t.foreground))
+            .on_click((_e, cx) => this.closeSearch(cx)).child("✕")))))
+      .child(this.statusBar(t));
+  }
+
+  // Top: where you are. The file (home shortened), and a crumb back after a link.
+  headerBar(t) {
+    const path = (this.file ?? "").replace(home(), "~"), name = path.split("/").pop(), dir = path.slice(0, path.length - name.length);
+    const prev = this.history.length ? this.history[this.history.length - 1].file.split("/").pop() : null;
+    return h_flex().h(30).flex_none().px(14).gap(10).items_center().bg(t.chrome).border_b(1).border_color(t.border).text_size(12)
+      .when(Boolean(prev), el => el.child(div().id("md-back").px(6).rounded(4).cursor_pointer().text_color(t.accent).hover(s => s.bg(t.hover))
+        .on_click((_e, cx) => this.back(cx)).child(`← ${prev}`)))
+      .child(h_flex().flex_1().min_w(0).items_center().child(div().truncate().text_color(t.dim).child(dir)).child(div().flex_none().text_color(t.foreground).font_semibold().child(name)))
+      .when(this.changed.size > 0, el => el.child(div().px(8).rounded(4).bg(t.ansi2 + "22").text_color(t.ansi2).child(`${this.changed.size} changed`)));
+  }
+
+  // Bottom: a vim-style status line. Mode and messages left; section, line and progress right.
+  statusBar(t) {
+    const b = this.blocks[this.cursor], lines = (this.src.match(/\n/g)?.length ?? 0) + 1;
+    const pct = this.contentH <= this.viewH ? 100 : Math.round(100 * this.offset / (this.contentH - this.viewH));
+    const sec = this.sectionOf(this.cursor), secName = sec !== null ? plain(this.blocks[sec].tokens) : "";
+    const mode = this.anchor !== null ? "VISUAL" : this.searching ? "SEARCH" : this.outline ? "OUTLINE" : "NORMAL";
+    return h_flex().h(24).flex_none().px(10).gap(10).items_center().bg(t.chrome).border_t(1).border_color(t.border).text_size(11.5).font_family(BODY())
+      .child(div().px(6).rounded(3).font_semibold().bg(mode === "NORMAL" ? t.surface : t.accent).text_color(mode === "NORMAL" ? t.muted : t.accent_foreground).child(mode))
+      .when(Boolean(this.pending || this.count), el => el.child(div().text_color(t.dim).child(this.count + this.pending)))
+      .child(div().flex_1().min_w(0).truncate().text_color(t.ansi2).child(this.flash ?? ""))
+      .when(Boolean(secName), el => el.child(div().max_w(220).truncate().text_color(t.dim).child(`§ ${secName}`)))
+      .when(Boolean(b), el => el.child(div().text_color(t.muted).child(`L${b.from}/${lines}`)))
+      .child(div().w(36).text_right().text_color(t.muted).child(pct <= 0 ? "Top" : pct >= 100 ? "Bot" : `${pct}%`));
   }
 }

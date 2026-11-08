@@ -96,7 +96,7 @@ mdh hl FILE --lines 40-52 --note "why this matters"       # replaces earlier hig
 mdh hl FILE --text "a phrase from the doc" --color green  # matches the block containing it
 mdh hl FILE --lines 90 --add --color red                  # --add keeps the earlier ones
 mdh focus FILE 2 · mdh clear FILE · mdh show FILE
-mdh sel                                                   # what the person sent with V … Enter
+mdh sel                                                   # what the person pinned with V … p
 ```
 
 Notes are markdown. Colors: yellow (default), green, red, blue, purple, cyan.
@@ -118,7 +118,8 @@ block). For Claude Code there's a ready skill in
 | `zz` · `za` `zc` `zo` · `zM` `zR` | center · toggle/close/open fold · fold/unfold all |
 | `V` then `j`/`k` | select blocks |
 | `y` | copy the selection's markdown source |
-| `Enter` | send the selection to the agent (`mdh sel`) |
+| `p` | pin the selection for the agent (`mdh sel` reads it) |
+| `Enter` | fold the heading, or follow the first link in the block |
 | `/` then `Enter` / `Shift-Enter`, `n` `N` | search; next / previous match (or highlight) |
 | `#` | line numbers on/off |
 | `Esc` | leave visual mode, close search, clear the sent selection |
