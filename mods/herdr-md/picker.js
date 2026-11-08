@@ -26,13 +26,30 @@ export function join(dir, rel) {
 // to git/find as its own argument, never through a shell.
 // `exec(cmd, args)` resolves to { code, stdout, stderr } (Herdr's exec).
 // Returns { root, kind: "git" | "folder", files: [relative paths], total, capped }.
+// A document can live in a cloned repo that isn't trusted. Its .git/config may
+// name programs git runs on its own (core.fsmonitor runs on ls-files --others),
+// so every call turns those off, and git is used only in a work tree the person
+// owns (else the folder listing below). Herdr's exec takes no env, so system
+// config (GIT_CONFIG_NOSYSTEM) can't be skipped; that file isn't the repo's.
+const GIT_SAFE = ["-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false"];
+
+async function ownedByMe(exec, path) {
+  const me = await exec("id", ["-u"]).catch(() => null);
+  let st = await exec("stat", ["-f", "%u", path]).catch(() => null);                        // macOS / BSD
+  if (!st || st.code !== 0) st = await exec("stat", ["-c", "%u", path]).catch(() => null);   // GNU
+  const uid = me?.code === 0 ? me.stdout.trim() : "";
+  return Boolean(uid && st?.code === 0 && st.stdout.trim() === uid);
+}
+
 export async function listFiles(exec, dir) {
-  const top = await exec("git", ["-C", dir, "rev-parse", "--show-cdup"]).catch(() => null);
+  const top = await exec("git", [...GIT_SAFE, "-C", dir, "rev-parse", "--show-cdup"]).catch(() => null);
   if (top && top.code === 0) {
     const root = join(dir, top.stdout.trim());
-    const r = await exec("git", ["-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard",
-      "--", ":(icase)*.md", ":(icase)*.markdown"]).catch(() => null);
-    if (r && r.code === 0) return finish(root, "git", [...new Set(r.stdout.split("\0"))].filter(p => p && MD.test(p) && !skipped(p)));
+    if (await ownedByMe(exec, root)) {
+      const r = await exec("git", [...GIT_SAFE, "-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard",
+        "--", ":(icase)*.md", ":(icase)*.markdown"]).catch(() => null);
+      if (r && r.code === 0) return finish(root, "git", [...new Set(r.stdout.split("\0"))].filter(p => p && MD.test(p) && !skipped(p)));
+    }
   }
   const r = await exec("find", [dir, "-maxdepth", String(FIND_DEPTH),
     "(", "-name", "node_modules", "-o", "-name", ".git", "-o", "-name", ".cache", "-o", "-name", "Library", "-o", "-name", ".Trash", ")", "-prune",
