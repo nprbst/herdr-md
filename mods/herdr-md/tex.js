@@ -21,28 +21,31 @@ const ACCENT = { hat: "̂", bar: "̄", tilde: "̃", vec: "⃗", dot: "̇", overl
 // One {…} group or a single token, from position i.
 function group(s, i) {
   if (s[i] === "{") { let d = 0, j = i; for (; j < s.length; j++) { if (s[j] === "{") d++; else if (s[j] === "}" && --d === 0) break; } return [s.slice(i + 1, j), j + 1]; }
-  if (s[i] === "\\") { const m = s.slice(i).match(/^\\([a-zA-Z]+|.)/); return [m[0], i + m[0].length]; }
+  if (s[i] === "\\") { const m = s.slice(i).match(/^\\([a-zA-Z]+|.)/); return m ? [m[0], i + m[0].length] : ["\\", i + 1]; }
   return [s[i] ?? "", i + 1];
 }
 
 const script = (t, map, mark) => [...t].every(c => map[c]) ? [...t].map(c => map[c]).join("") : `${mark}(${t})`;
 
-export function texToUnicode(src) {
+export function texToUnicode(src, depth = 0) {
+  if (depth > 20) return src;   // pathological nesting: leave it as written
   let s = src, out = "", i = 0;
   while (i < s.length) {
     const c = s[i];
     if (c === "\\") {
-      const m = s.slice(i).match(/^\\([a-zA-Z]+|.)/), name = m[1]; i += m[0].length;
-      if (name === "frac") { const [a, j] = group(s, i); const [b, k] = group(s, j); i = k; out += `${wrap(texToUnicode(a))}/${wrap(texToUnicode(b))}`; continue; }
-      if (ACCENT[name]) { const [a, j] = group(s, i); i = j; const t = texToUnicode(a); out += t.length === 1 ? t + ACCENT[name] : `${t}${ACCENT[name]}`; continue; }
+      const m = s.slice(i).match(/^\\([a-zA-Z]+|.)/);
+      if (!m) { out += "\\"; i++; continue; }   // a lone trailing backslash
+      const name = m[1]; i += m[0].length;
+      if (name === "frac") { const [a, j] = group(s, i); const [b, k] = group(s, j); i = k; out += `${wrap(texToUnicode(a, depth + 1))}/${wrap(texToUnicode(b, depth + 1))}`; continue; }
+      if (ACCENT[name]) { const [a, j] = group(s, i); i = j; const t = texToUnicode(a, depth + 1); out += t.length === 1 ? t + ACCENT[name] : `${t}${ACCENT[name]}`; continue; }
       if (/^(mathbf|mathrm|textrm|text|mathit|operatorname|boldsymbol|mathcal|textbf|left|right|big|Big)$/.test(name)) {
         if (/^(left|right|big|Big)$/.test(name)) continue;
-        const [a, j] = group(s, i); i = j; out += texToUnicode(a); continue;
+        const [a, j] = group(s, i); i = j; out += texToUnicode(a, depth + 1); continue;
       }
-      if (name === "sqrt") { const [a, j] = group(s, i); i = j; out += `√${wrap(texToUnicode(a))}`; continue; }
+      if (name === "sqrt") { const [a, j] = group(s, i); i = j; out += `√${wrap(texToUnicode(a, depth + 1))}`; continue; }
       out += SYM[name] ?? name; continue;
     }
-    if (c === "^" || c === "_") { const [a, j] = group(s, i + 1); i = j; out += script(texToUnicode(a), c === "^" ? SUP : SUB, c); continue; }
+    if (c === "^" || c === "_") { const [a, j] = group(s, i + 1); i = j; out += script(texToUnicode(a, depth + 1), c === "^" ? SUP : SUB, c); continue; }
     if (c === "{" || c === "}") { i++; continue; }
     out += c; i++;
   }
@@ -54,5 +57,9 @@ const wrap = t => t.length > 1 && /[^\w′]/.test(t) ? `(${t})` : t;
 // Replace inline $…$ in a markdown paragraph. Pandoc's rule keeps prices like
 // "$5 and $10" as text: no space just inside the dollars, no digit right after.
 export function inlineMath(md) {
+  try { return replaceInline(md); } catch { return md; }   // never let a bad formula break the view
+}
+
+function replaceInline(md) {
   return md.replace(/(^|[^\\$])\$(?!\s)([^$\n]+?)(?<!\s)\$(?!\d)/g, (_, pre, tex) => `${pre}*${texToUnicode(tex).replace(/[*_]/g, "\\$&")}*`);
 }
