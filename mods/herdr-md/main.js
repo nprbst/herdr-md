@@ -847,10 +847,18 @@ export default class Md extends View {
 
   // O: open the clip in QuickTime Player. Only video files reach this, and only
   // that app is asked to open them, so a document can't launch anything else.
+  // QuickTime sniffs content too (an "x.mp4" HLS playlist makes it fetch URLs),
+  // so only a clip that passed the container check opens, and it is re-probed
+  // first: the cache key is path+mtime+size, which a swapped file can match.
   openVideo(cx) {
     const v = this.videos[this.videoList[this.blockVideo(this.blocks[this.cursor])]];
     if (!v?.abs || v.missing) { this.flash = "O: put the cursor on a video"; return cx.notify(); }
-    exec("open", ["-a", "QuickTime Player", v.abs]); this.flash = "opened in QuickTime Player"; cx.notify();
+    if (v.error || !v.meta) { this.flash = v.error ? `O: couldn't prepare: ${v.error}` : "O: video not checked yet"; return cx.notify(); }
+    cx.spawn(async cx => {
+      const probe = await this.probeVideo(v.abs);
+      if (probe.error) { v.error = probe.error; this.flash = `O: couldn't prepare: ${probe.error}`; return cx.notify(); }
+      exec("open", ["-a", "QuickTime Player", v.abs]); this.flash = "opened in QuickTime Player"; cx.notify();
+    });
   }
 
   // ---- zoom: Enter on a diagram or image fills the pane with it ----
