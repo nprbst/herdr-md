@@ -64,6 +64,7 @@ const Z = () => Number(settings().zoom) || 1;
 const plainNote = md => md.replace(/\*\*|__|[*_`]/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
 const dirname = p => p.slice(0, p.lastIndexOf("/")) || "/";
 const plain = tokens => (tokens ?? []).map(t => t.tokens ? plain(t.tokens) : t.text ?? t.raw ?? "").join("");
+const isComment = tok => tok.type === "html" && /^\s*(<!--[\s\S]*?-->\s*)+$/.test(tok.raw);
 const squash = s => s.replace(/\s+/g, " ").trim().toLowerCase();
 
 // Top-level blocks, with lists split into one block per item so a highlight or
@@ -72,7 +73,9 @@ function blocks(src, tokens) {
   const out = [];
   for (const tok of tokens) {
     if (tok.type === "list") tok.items.forEach((item, j) => out.push({ type: "listitem", item, list: tok, n: (tok.start || 1) + j, raw: item.raw }));
-    else if (tok.type !== "space") out.push(tok);
+    // Space and comment-only HTML render nothing, so they aren't blocks (no cursor stop).
+    // Safe: each block's lines come from finding its raw text, not from counting.
+    else if (tok.type !== "space" && !isComment(tok)) out.push(tok);
   }
   let cursor = 0;
   for (const b of out) {
@@ -580,6 +583,7 @@ export default class Md extends View {
             .children(row.map((c, j) => cell(c, j, `${id}-${r}-${j}`)))));
       }
       case "html":
+        if (isComment(tok)) return div();
         return div().py(2).text_size(13).text_color(t.dim).child(tok.raw.trim());
       case "space":
         return div();
