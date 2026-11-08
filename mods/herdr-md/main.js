@@ -10,17 +10,10 @@
 import { View, div, image } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, TextView, InputState, Input } from "gpui-base";
 import { props, readTextFile, watchFolder, exec, theme, settings, home, nextCommand, panes, focused, run } from "herdr";
-import { marked } from "./marked.js";
+import { marked, splitChunks, capSource, refDefs, lexChunk, blocks, LEX_MAX } from "./lex.js";
 import { inlineMath } from "./tex.js";
 import { hash as bhash, diffBlocks, slug, labelOf, inlineRoles, alertOf, ALERTS } from "./doc.js";
 import { listFiles, parseRecent, pushRecent, rank, runs, previewSource } from "./picker.js";
-
-// $$…$$ display math as its own block (single- or multi-line).
-marked.use({ extensions: [{
-  name: "math", level: "block",
-  start(src) { const i = src.indexOf("$$"); return i < 0 ? undefined : i; },
-  tokenizer(src) { const m = /^\$\$([\s\S]+?)\$\$[^\S\n]*(?:\n|$)/.exec(src); if (m) return { type: "math", raw: m[0], text: m[1].trim() }; },
-}] });
 
 // Figures (display math, Mermaid) are rendered by render/render.mjs into
 // .cache/r/<hash>.{svg,png}; the hash covers the source and the colors used.
@@ -141,33 +134,12 @@ const solid = tokens => (tokens ?? []).map(t => t.type === "codespan" ? t.raw.re
   : t.tokens ? solid(t.tokens) : t.text ?? t.raw ?? "").join("");
 const squash = s => s.replace(/\s+/g, " ").trim().toLowerCase();
 
-// Top-level blocks, with lists split into one block per item so a highlight or
-// a scroll target can land on a single bullet. Each gets its source lines.
-function blocks(src, tokens) {
-  const out = [];
-  for (const tok of tokens) {
-    if (tok.type === "list") tok.items.forEach((item, j) => out.push({ type: "listitem", item, list: tok, n: (tok.start || 1) + j, raw: item.raw }));
-    // Space and comment-only HTML render nothing, so they aren't blocks (no cursor stop).
-    // Safe: each block's lines come from finding its raw text, not from counting.
-    else if (tok.type !== "space" && !isComment(tok)) out.push(tok);
-  }
-  let cursor = 0;
-  for (const b of out) {
-    const at = src.indexOf(b.raw, cursor), start = at < 0 ? cursor : at;
-    const end = start + b.raw.replace(/\s+$/, "").length;
-    b.from = src.slice(0, start).split("\n").length;
-    b.to = src.slice(0, end).split("\n").length;
-    if (at >= 0) cursor = end;
-  }
-  return out;
-}
-
 export default class Md extends View {
   init(_props, cx) {
     this.file = props()?.file ?? null;
     this.blocks = []; this.error = null; this.codes = []; this.images = {}; this.figs = {}; this.videos = {}; this.videoList = []; this.born = Date.now() * 1e6; this.videoSeq = null; this.pendingVideo = null;
     this.noteAlpha = 1; this.typed = Infinity;
-    this.offset = 0; this.motion = 0; this.heights = []; this.viewH = 0; this.contentH = 0; this.colW = MAX_W - PAD * 2;
+    this.offset = 0; this.motion = 0; this.heights = []; this.loadGen = 0; this.shown = null; this.viewH = 0; this.contentH = 0; this.colW = MAX_W - PAD * 2;
     this.notes = { highlights: [] }; this.seq = null; this.pendingFocus = null; this.aim = null;
     this.folded = new Set(); this.hidden = [];
     this.labels = new Map(); this.anchors = new Map(); this.changed = new Set(); this.removed = new Map(); this.lastHashes = null;
@@ -175,7 +147,7 @@ export default class Md extends View {
     this.help = false; this.helpIn = 0; this.zoom = null; this.viewW = 0;
     this.query = ""; this.matches = []; this.mi = 0; this.searching = false; this.typing = false;
     // Vim-ish cursor: one rendered block is one "line". anchor !== null means visual mode.
-    this.cursor = 0; this.anchor = null; this.pending = ""; this.count = ""; this.numbers = true; this.picked = null; this.src = "";
+    this.cursor = 0; this.anchor = null; this.pending = ""; this.count = ""; this.numbers = true; this.picked = null; this.src = ""; this.lines = 0;
     this.handle = cx.focus_handle();
     this.input = InputState.new({ value: "", placeholder: "Search" });
     this.input.on("change", (_e, cx) => { this.search(this.input.value()); this.aimAt(this.matches[this.mi = 0]); cx.notify(); });
@@ -223,39 +195,75 @@ export default class Md extends View {
     });
   }
 
+  // Read and lex the file in bounded chunks (lex.js), pausing between them so the
+  // pane never blocks. A file not on screen yet shows its first chunk at once;
+  // a reload swaps the whole document in when it's done. Everything that needs
+  // the whole document (change marks, agent highlights, anchors, figures) waits
+  // for the last chunk. A newer load (file changed, navigated) stops this one.
   load(cx) {
     if (!this.file) return;   // the empty state (render) points at ctrl-p
+    const gen = ++this.loadGen, file = this.file, codes = [];
+    const stale = () => gen !== this.loadGen;
+    // This load's code editors replace the old ones when its blocks go on screen.
+    const adopt = () => { if (this.codes !== codes) { this.codes.forEach(c => c.release?.()); this.codes = codes; } };
     cx.spawn(async cx => {
       try {
-        const text = await readTextFile(this.file);
-        if (text === null) this.error = "File not found";
-        else {
-          this.codes.forEach(c => c.release?.()); this.codes = [];
-          const tokens = marked.lexer(text); this.src = text;
-          this.prepare(tokens);
-          // Keep measured heights: a reloaded block whose size didn't change never
-          // reports again (on_size_change fires on new or changed sizes only), and
-          // reaim() waits for every height above its target.
-          this.blocks = this.index(blocks(text, tokens)); this.heights.length = Math.min(this.heights.length, this.blocks.length); this.error = null;
-          this.blocks.forEach(b => { b.find = squash(b.type === "heading" ? plain(b.tokens) : b.raw.replace(/[*_`#>|~]+/g, " ")); });
-          if ([...this.folded].some(i => this.blocks[i]?.type !== "heading")) this.folded.clear();
-          this.refold(); this.search(this.query);
-          this.cursor = Math.min(this.cursor, Math.max(0, this.blocks.length - 1)); this.anchor = null;
-          this.highlightAimed = false; this.resolve(); this.applyFocus();
-          await this.markChanges();
-          if (this.pendingAnchor !== null) { this.jumpAnchor(this.pendingAnchor); this.pendingAnchor = null; }
-          else if (this.restore) { this.cursor = Math.min(this.restore.cursor, this.blocks.length - 1); this.aimAt(this.cursor); this.restore = null; }
-          this.reaim();
-          cx.notify();
-          await this.loadImages(tokens);
-          cx.notify();
-          await this.loadVideos(tokens, cx);
-          cx.notify();
-          await this.renderFigures(tokens);
+        let text = null, cap = null;
+        try { text = await readTextFile(file); }
+        catch (e) {
+          // Herdr won't read a text file over 1 MiB: read its start instead.
+          if (!/exceeds/i.test(String(e))) throw e;
+          const [head, wc] = await Promise.all([exec("head", ["-c", String(LEX_MAX + 4096), file]), exec("wc", ["-l", file])]);
+          if (head.code !== 0) throw e;
+          text = head.stdout;
+          cap = { ...capSource(text, Math.min(LEX_MAX, text.length - 4096)), total: parseInt(wc.stdout, 10) || 0 };
         }
-      } catch (e) { this.error = String(e); }
+        if (stale()) return;
+        if (text === null) { this.error = "File not found"; return cx.notify(); }
+        cap ??= capSource(text);
+        const chunks = splitChunks(cap.text);
+        const links = chunks.length > 1 ? refDefs(cap.text) : null;
+        const fresh = this.shown !== file, tokens = [], list = [];
+        for (let k = 0; k < chunks.length; k++) {
+          const c = chunks[k], toks = lexChunk(c.text, links);
+          this.prepare(toks, codes);
+          for (const x of toks) tokens.push(x);
+          for (const b of blocks(c.text, toks, c.line - 1)) list.push(b);
+          if (k === chunks.length - 1) break;
+          if (k === 0 && fresh) { adopt(); this.src = text; this.lines = cap.total; this.setBlocks(list.slice()); this.shown = file; cx.notify(); }
+          await cx.sleep(1);
+          if (stale()) { if (this.codes !== codes) codes.forEach(c => c.release?.()); return; }
+        }
+        if (cap.cut) list.push({ type: "notice", raw: "", from: cap.lines, to: cap.lines,
+          text: `Showing the first ${cap.lines.toLocaleString()} lines of ${cap.total.toLocaleString()}: the file is too long to show whole. Open it in an editor for the rest.` });
+        adopt(); this.src = text; this.lines = cap.total; this.setBlocks(list); this.shown = file;
+        this.highlightAimed = false; this.applyFocus();
+        await this.markChanges();
+        if (stale()) return;
+        if (this.pendingAnchor !== null) { this.jumpAnchor(this.pendingAnchor); this.pendingAnchor = null; }
+        else if (this.restore) { this.cursor = Math.min(this.restore.cursor, this.blocks.length - 1); this.aimAt(this.cursor); this.restore = null; }
+        this.reaim();
+        cx.notify();
+        await this.loadImages(tokens);
+        cx.notify();
+        await this.loadVideos(tokens, cx);
+        cx.notify();
+        await this.renderFigures(tokens);
+      } catch (e) { if (!stale()) this.error = String(e); }
       cx.notify();
     });
+  }
+
+  // Put a document's blocks on screen. Keep measured heights: a reloaded block
+  // whose size didn't change never reports again (on_size_change fires on new or
+  // changed sizes only), and reaim() waits for every height above its target.
+  setBlocks(list) {
+    this.blocks = this.index(list); this.heights.length = Math.min(this.heights.length, this.blocks.length); this.error = null;
+    this.blocks.forEach(b => { b.find = squash(b.type === "heading" ? plain(b.tokens) : b.raw.replace(/[*_`#>|~]+/g, " ")); });
+    if ([...this.folded].some(i => this.blocks[i]?.type !== "heading")) this.folded.clear();
+    this.refold(); this.search(this.query);
+    this.cursor = Math.min(this.cursor, Math.max(0, this.blocks.length - 1)); this.anchor = null;
+    this.resolve();
   }
 
   // Reload when the file changes on disk.
@@ -754,6 +762,8 @@ export default class Md extends View {
       }
       case "math":
         return this.figure(tok, id, t);
+      case "notice":   // a file cut at LEX_MAX (lex.js)
+        return div().my(10).px(14).py(10).rounded(8).bg(t.ansi3 + "1c").border_l(3).border_color(t.ansi3).text_size(14).text_color(t.foreground).child(tok.text);
       case "code": {
         if (isMath(tok) || isMermaid(tok)) return this.figure(tok, id, t);
         const lines = tok.text.split("\n").length;
@@ -1491,7 +1501,7 @@ export default class Md extends View {
 
   // Bottom: a vim-style status line. Mode and messages left; section, line and progress right.
   statusBar(t) {
-    const b = this.blocks[this.cursor], lines = (this.src.match(/\n/g)?.length ?? 0) + 1;
+    const b = this.blocks[this.cursor], lines = this.lines;
     const pct = this.contentH <= this.viewH ? 100 : Math.round(100 * this.offset / (this.contentH - this.viewH));
     const sec = this.sectionOf(this.cursor), secName = sec !== null ? plain(this.blocks[sec].tokens) : "";
     const mode = this.pick ? "FIND" : this.anchor !== null ? "VISUAL" : this.searching ? "SEARCH" : this.outline ? "OUTLINE" : "NORMAL";
