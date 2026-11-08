@@ -12,9 +12,11 @@
   mdh video FILE [N] seek T                     jump to time T (seconds or m:ss); keeps playing or paused
   mdh sel                                       print what the person last sent from the viewer
                                                 (V to select, p to pin): file, lines, text
+  mdh pick                                      open the file picker (ctrl-p) in the focused viewer,
+                                                or in the only one
 
 The viewer watches ~/.cache/herdr-md/ and redraws and scrolls when a file there changes.
-Viewer keys: j/k move the cursor, V visual select, y copy, p pin for Claude, Enter fold/follow/zoom/play,
+Viewer keys: ctrl-p find a file (fuzzy, with preview), j/k move the cursor, V visual select, y copy, p pin for Claude, Enter fold/follow/zoom/play,
 O open a video in QuickTime, za fold, / search, n/N next match or highlight, # line numbers, ? key help, q close.
 """
 import argparse, json, os, re, subprocess, sys, time
@@ -56,7 +58,12 @@ def main():
     s = sub.add_parser("show"); s.add_argument("file")
     v = sub.add_parser("video"); v.add_argument("file"); v.add_argument("args", nargs="+")
     sub.add_parser("sel")
+    sub.add_parser("pick")
     a = p.parse_args()
+    if a.cmd == "pick":
+        # Every viewer hears it; the focused one (or the only one) opens its picker.
+        r = subprocess.run(["herdr-app", "do", "herdr-md.pick"], capture_output=True, text=True)
+        sys.stderr.write(r.stderr); sys.exit(r.returncode)
     if a.cmd == "sel":
         try:
             with open(os.path.join(DIR, "selection.json")) as f:

@@ -13,6 +13,7 @@ import { props, readTextFile, watchFolder, exec, theme, settings, home, nextComm
 import { marked } from "./marked.js";
 import { inlineMath } from "./tex.js";
 import { hash as bhash, diffBlocks, slug, labelOf, inlineRoles, alertOf, ALERTS } from "./doc.js";
+import { listFiles, parseRecent, pushRecent, rank, runs } from "./picker.js";
 
 // $$…$$ display math as its own block (single- or multi-line).
 marked.use({ extensions: [{
@@ -43,8 +44,10 @@ const HELP = [[
   ["MOVE", [["j k", "next / previous block (5j)"], ["gg G", "top / bottom"], ["{ }", "previous / next heading"],
     ["ctrl-d ctrl-u", "half page down / up"], ["ctrl-f ctrl-b", "page down / up"], ["space", "page down"], ["ctrl-e ctrl-y", "scroll a line, cursor stays"], ["zz", "center the cursor"]]],
   ["SHARE", [["V", "select blocks"], ["y", "copy the markdown source"], ["p", "pin the selection for Claude"], ["Esc", "unselect, close search, unpin"]]],
+  ["FIND A FILE (ctrl-p)", [["ctrl-n ctrl-p", "next / previous (or ctrl-j ctrl-k, arrows)"], ["Enter", "open here (Backspace comes back)"],
+    ["ctrl-v", "open in a split to the right"], ["ctrl-d ctrl-u", "scroll the preview"], ["Esc", "close"]]],
 ], [
-  ["READ", [["o", "outline"], ["Enter", "fold a heading, follow a link, zoom a figure, play a video"], ["O", "open a video in QuickTime"], ["Backspace", "back after a link"],
+  ["READ", [["ctrl-p", "find a markdown file, with preview"], ["o", "outline"], ["Enter", "fold a heading, follow a link, zoom a figure, play a video"], ["O", "open a video in QuickTime"], ["Backspace", "back after a link"],
     ["za zc zo", "toggle / close / open fold"], ["zM zR", "fold / unfold all"], ["] [", "next / previous change"], ["c", "clear change marks"],
     ["/", "search"], ["n N", "next / previous match or note"], ["#", "line numbers"]]],
   ["ZOOM (Enter on a diagram or image)", [["h j k l", "pan (or drag, or scroll)"], ["+ -", "zoom in / out (or ctrl-scroll)"], ["0", "fit"], ["Esc", "close"]]],
@@ -116,6 +119,11 @@ const MODIFIER_KEYS = ["shift", "control", "alt", "platform", "function", "capsl
 const CACHE = `mods/${MOD}/.cache`;
 const NOTES = () => `${home()}/.cache/herdr-md`;
 const noteKey = file => file.replace(/[^a-zA-Z0-9]+/g, "_") + ".json";
+// The ctrl-p picker: recently opened files (newest first), its row height, how
+// many blocks a preview renders, and how long the selection must rest before
+// a file is read for the preview (so holding ctrl-n never waits on disk).
+const RECENT = () => `${NOTES()}/recent.json`;
+const PICK_ROW = 28, PV_BLOCKS = 60, PV_WAIT = 70;
 const LANG = { sh: "bash", shell: "bash", zsh: "bash", console: "bash", ts: "typescript", js: "javascript", py: "python", rs: "rust", yml: "yaml", toml: "yaml", jsonc: "json" };
 
 // on_size_change and wheel deltas report zoomed pixels; layout sizes (top, h)
@@ -173,6 +181,14 @@ export default class Md extends View {
     this.input.on("submit", (e, cx) => { this.step(e?.shift ? -1 : 1); cx.notify(); });
     this.input.on("focus", (_e, cx) => { this.typing = true; cx.notify(); });
     this.input.on("blur", (_e, cx) => { this.typing = false; cx.notify(); });
+    // The ctrl-p picker. pick: { query, rows, sel, top, pvY } while open.
+    this.pick = null; this.pickIn = 0; this.pickList = null; this.recent = []; this.pv = null; this.pvCache = new Map(); this.pvSeq = 0; this.pvLoading = false; this.pickVis = 12;
+    this.pickInput = InputState.new({ value: "", placeholder: "Find a markdown file" });
+    this.pickInput.on("change", (_e, cx) => { if (this.pick && this.pick.query !== this.pickInput.value()) { this.pick.query = this.pickInput.value(); this.rerank(cx, false); } });
+    this.pickInput.on("submit", (_e, cx) => this.pickOpen(cx));
+    this.pickInput.on("focus", () => { this.pickTyping = true; });
+    this.pickInput.on("blur", () => { this.pickTyping = false; });
+    this.remember(this.file);
     this.load(cx);
     this.watch(cx);
     this.watchNotes(cx);
@@ -181,8 +197,19 @@ export default class Md extends View {
     // the focused pane a moment later, or the keyboard stays here while focus moves on.
     cx.spawn(async cx => {
       for (;;) {
-        if (await nextCommand() !== "focus") continue;
-        cx.timer.after(60, () => { if (panes().find(p => p.focused)?.mod === MOD) this.handle.focus(); });
+        const c = await nextCommand();
+        // `mdh pick` (herdr-app do herdr-md.pick): the focused viewer opens its
+        // picker; with no viewer focused, the only viewer does (and takes focus).
+        if (c === "pick") {
+          // Every copy hears it; the one holding the keyboard is the focused one.
+          const mine = panes().filter(p => p.mod === MOD);
+          if (this.pick) continue;
+          if (this.handle.is_focused() || this.typing) this.openPicker(cx);
+          else if (mine.length === 1) { run("pane.focus", { pane: mine[0].pane }); this.openPicker(cx); }
+          continue;
+        }
+        if (c !== "focus") continue;
+        cx.timer.after(60, () => { if (panes().find(p => p.focused)?.mod === MOD) (this.pick ? this.pickInput : this.handle).focus(); });
       }
     });
   }
@@ -313,7 +340,7 @@ export default class Md extends View {
   navigate(file, frag, cx, push) {
     if (push) this.history.push({ file: this.file, cursor: this.cursor });
     if (file === this.file) { if (frag) this.jumpAnchor(frag); return cx.notify(); }
-    this.file = file.replace(/\/[^/]+\/\.\.\//g, "/");
+    this.file = file.replace(/\/[^/]+\/\.\.\//g, "/"); this.remember(this.file);
     this.folded.clear(); this.offset = 0; this.motion = 0; this.cursor = 0; this.anchor = null;   // heights kept: see load()
     this.lastHashes = null; this.changed = new Set(); this.removed = new Map(); this.seq = null; this.aim = null;
     this.pendingAnchor = frag;
@@ -456,7 +483,7 @@ export default class Md extends View {
   scrollBy(dy, cx) { this.aim = null; this.motion = NUDGE; const o = this.clamp(this.offset + dy); if (o !== this.offset) { this.offset = o; cx.notify(); } }
 
   // Editor states must be made outside render: build one per code block at load.
-  prepare(tokens) {
+  prepare(tokens, into = this.codes) {
     const t = theme();
     marked.walkTokens(tokens, tok => {
       if (tok.type !== "code") return;
@@ -464,7 +491,7 @@ export default class Md extends View {
       tok.state = EditorState.new({ language: LANG[lang] ?? (lang || "text"), readonly: true, value: tok.text,
         font_family: settings().font_family, font_size: 13,
         syntax: { keyword: t.ansi5, string: t.ansi2, comment: t.dim, function: t.ansi4, type: t.ansi3, number: t.ansi1, constant: t.ansi6 } });
-      this.codes.push(tok.state);
+      into.push(tok.state);
     });
   }
 
@@ -657,18 +684,22 @@ export default class Md extends View {
             .child(div().flex_1().text_right().text_size(13).text_color(t.dim).child(tok.eqNum ? `(${tok.eqNum})` : ""))
         : h_flex().w_full().justify_center().my(8).p(16).rounded(8).bg(t.surface).border_1().border_color(t.border).child(image(f.path).w(w).h(h));
     }
-    const label = f.error ? `${math ? "math" : "mermaid"} · couldn't render: ${f.error}` : `${math ? "math" : "mermaid"} · rendering…`;
+    const label = f.error ? `${math ? "math" : "mermaid"} · couldn't render: ${f.error}` : `${math ? "math" : "mermaid"} · ${tok.pv ? "rendered when opened" : "rendering…"}`;
     return v_flex().my(8).rounded(8).overflow_hidden().border_1().border_color(f.error ? t.blocked : t.border).bg(t.surface)
       .child(div().px(12).py(4).text_size(12).text_color(f.error ? t.blocked : t.dim).child(label))
       .child(div().px(12).pb(8).text_size(13).text_color(t.muted).child(tok.text));
   }
 
   inline(id, md) {
-    return TextView.markdown(id, inlineMath(inlineRoles(md, this.labels))).selectable(true)
-      .on_link_click((url, cx) => this.follow(url, cx));
+    const pv = this.pvMode;   // a preview's links go nowhere (they'd move the viewer)
+    return TextView.markdown(id, inlineMath(inlineRoles(md, pv ? new Map() : this.labels))).selectable(!pv)
+      .on_link_click((url, cx) => { if (!pv) this.follow(url, cx); });
   }
 
   picture(tok, id, t) {
+    // In the picker's preview: a light placeholder (images load when the file opens).
+    if (tok.pv) return div().my(6).px(12).py(6).rounded(6).bg(t.surface).text_color(t.dim).text_size(12)
+      .child(`${isVideo(tok.href) ? "▶" : "🖼"}  ${tok.text || tok.href}`);
     if (isVideo(tok.href)) return this.videoBlock(tok, t);
     const img = this.images[tok.href];
     if (!img?.path) return div().my(6).px(12).py(8).rounded(6).bg(t.surface).text_color(t.dim).text_size(13)
@@ -696,12 +727,12 @@ export default class Md extends View {
     switch (tok.type) {
       case "heading": {
         const color = [t.ansi4, t.ansi5, t.ansi6, t.ansi2, t.ansi3, t.muted][tok.depth - 1];
-        const folded = this.folded.has(i), n = folded ? this.sectionSize(i) : 0;
-        return h_flex().id(`fold-${i}`).items_center().gap(10).cursor_pointer().pt(tok.depth <= 2 ? 22 : 14).pb(tok.depth <= 2 ? 10 : 4)
+        const pv = this.pvMode, folded = !pv && this.folded.has(i), n = folded ? this.sectionSize(i) : 0;
+        return h_flex().id(`fold-${i}`).items_center().gap(10).when(!pv, el => el.cursor_pointer()).pt(tok.depth <= 2 ? 22 : 14).pb(tok.depth <= 2 ? 10 : 4)
           .text_size(SIZE[`h${tok.depth}`]).font_weight(tok.depth <= 2 ? 700 : 600).text_color(color)
           .when(tok.depth <= 2, el => el.border_b(1).border_color(t.border).mb(6))
-          .on_click((_e, cx) => { this.toggleFold(i); cx.notify(); })
-          .child(div().w(14).ml(-24).flex_none().text_size(13).text_color(folded ? color : t.border).child(folded ? "▸" : "▾"))
+          .on_click((_e, cx) => { if (!pv) { this.toggleFold(i); cx.notify(); } })
+          .when(!pv, el => el.child(div().w(14).ml(-24).flex_none().text_size(13).text_color(folded ? color : t.border).child(folded ? "▸" : "▾")))
           .child(div().flex_1().min_w(0).child(plain(tok.tokens)))
           .when(folded, el => el.child(div().flex_none().text_size(13).font_weight(400).text_color(t.dim).child(`${n} block${n === 1 ? "" : "s"} folded`)));
       }
@@ -998,6 +1029,222 @@ export default class Md extends View {
       }));
   }
 
+  // ---- file picker (ctrl-p) ----
+  // Telescope-style: a prompt and a fuzzy-filtered list on the left, a live
+  // preview on the right drawn by block(). Files: markdown under the git work
+  // tree (tracked + untracked, not ignored), else under this folder; see picker.js.
+
+  // Newest first in ~/.cache/herdr-md/recent.json (read by the picker and `mdh pick`).
+  async remember(file) {
+    if (!file) return;
+    let list = [];
+    try { list = parseRecent(await readTextFile(RECENT())); } catch {}
+    if (list[0] === file) return;
+    this.recent = pushRecent(list, file);
+    exec("sh", ["-c", 'mkdir -p "$1" && printf %s "$2" > "$1/.recent.$$" && mv -f "$1/.recent.$$" "$1/recent.json"', "recent", NOTES(), JSON.stringify(this.recent)]);
+  }
+
+  openPicker(cx) {
+    if (this.pick || !this.file) return;
+    this.outline = false; if (this.help) this.help = false; this.helpIn = 0;
+    this.pick = { query: "", rows: [], sel: 0, top: 0, pvY: 0 }; this.pickIn = 0;
+    this.pickInput.set_value(""); this.pickInput.focus();
+    // A listing of this tree from an earlier open shows at once; a fresh one replaces it.
+    if (this.pickList && !this.file.startsWith(this.pickList.root + "/")) this.pickList = null;
+    this.rerank(cx, false);
+    cx.timer.after(16, cx => { this.pickIn = 1; cx.notify(); });
+    cx.spawn(async cx => {
+      const [list, recent] = await Promise.all([listFiles(exec, dirname(this.file)), readTextFile(RECENT()).catch(() => null)]);
+      this.pickList = list; this.recent = parseRecent(recent);
+      if (this.pick) this.rerank(cx, true);
+    });
+  }
+
+  closePicker(cx) {
+    if (!this.pick) return;
+    this.pickIn = 0; this.pvSeq++; this.handle.focus(); cx.notify();
+    const p = this.pick;
+    cx.timer.after(180, cx => { if (this.pick === p && !this.pickIn) { this.pick = null; cx.notify(); } });
+  }
+
+  // New rows for the query. keep: stay on the same file (a refreshed listing),
+  // else back to the top (the query changed).
+  rerank(cx, keep) {
+    const p = this.pick; if (!p) return;
+    const was = p.rows[p.sel]?.abs;
+    p.rows = this.pickList ? rank(p.query, this.pickList, this.recent, this.file) : [];
+    const at = keep && was ? p.rows.findIndex(r => r.abs === was) : -1;
+    this.pickSelect(at >= 0 ? at : 0, cx);
+  }
+
+  // Move the selection; the list window follows it with a two-row margin.
+  pickSelect(i, cx) {
+    const p = this.pick; if (!p) return;
+    const n = p.rows.length, vis = this.pickVis;
+    p.sel = Math.max(0, Math.min(i, n - 1)); if (p.sel < 0) p.sel = 0;
+    const m = Math.min(2, Math.floor((vis - 1) / 2));
+    if (p.sel < p.top + m) p.top = Math.max(0, p.sel - m);
+    else if (p.sel > p.top + vis - 1 - m) p.top = Math.min(Math.max(0, n - vis), p.sel - vis + 1 + m);
+    this.preview(p.rows[p.sel]?.abs ?? null, cx);
+    cx.notify();
+  }
+
+  // Show a file's preview: from the cache at once, else read it once the
+  // selection has rested PV_WAIT ms (typing and fast moves never wait on disk).
+  // Until then the old preview stays, dimmed.
+  preview(abs, cx) {
+    const seq = ++this.pvSeq;
+    if (this.pv?.abs === abs) { this.pvLoading = false; return; }
+    if (!abs) { this.pv = null; this.pvLoading = false; return; }
+    const hit = this.pvCache.get(abs);
+    if (hit) { this.pvCache.delete(abs); this.pvCache.set(abs, hit); this.pv = hit; this.pick.pvY = 0; this.pvLoading = false; return; }
+    this.pvLoading = true;
+    cx.timer.after(PV_WAIT, cx => {
+      if (seq !== this.pvSeq) return;
+      cx.spawn(async cx => {
+        let text = null, error = null;
+        try { text = await readTextFile(abs); } catch (e) { error = String(e).slice(0, 120); }
+        if (seq !== this.pvSeq || !this.pick) return;
+        const pv = { abs, blocks: [], codes: [], lines: 0, more: 0, error: error ?? (text === null ? "not found" : null) };
+        if (text !== null) {
+          const all = blocks(text, marked.lexer(text)).filter(b => !labelOf(b));
+          pv.blocks = all.slice(0, PV_BLOCKS); pv.more = all.length - pv.blocks.length; pv.lines = (text.match(/\n/g)?.length ?? 0) + 1;
+          // The blocks' own tokens (a list item's list), each made once.
+          const top = [...new Set(pv.blocks.map(b => b.type === "listitem" ? b.list : b))];
+          marked.walkTokens(top, tok => { tok.pv = true; if (isMath(tok) || isMermaid(tok)) tok.fig = this.figKey(tok); });
+          this.prepare(top, pv.codes);
+        }
+        this.pvCache.set(abs, pv);
+        // Keep a few; drop the oldest and its code editors.
+        while (this.pvCache.size > 12) { const [k, old] = this.pvCache.entries().next().value; if (old === this.pv) break; old.codes.forEach(c => c.release?.()); this.pvCache.delete(k); }
+        this.pv = pv; this.pick.pvY = 0; this.pvLoading = false;
+        cx.notify();
+        // Math and diagrams this machine already rendered (any document, same
+        // source and colors) show as images; the rest stay placeholders.
+        const root = `${home()}/.config/herdr-app/${FIG}`; let found = false;
+        for (const b of pv.blocks) {
+          if (!b.fig || this.figs[b.fig]?.path) continue;
+          const ext = isMath(b) ? "svg" : "png";
+          try { const m = JSON.parse(await readTextFile(`${root}/${b.fig}.${ext}.json`) ?? "null"); if (m?.w) { this.figs[b.fig] = { path: `${FIG}/${b.fig}.${ext}`, w: m.w, h: m.h }; found = true; } } catch {}
+        }
+        if (found && this.pv === pv) cx.notify();
+      });
+    });
+  }
+
+  pickOpen(cx) {
+    const row = this.pick?.rows[this.pick.sel]; if (!row) return;
+    this.closePicker(cx);
+    this.navigate(row.abs, null, cx, true);
+  }
+
+  // ctrl-v: a new viewer to the right of this one, this one unchanged.
+  pickSplit(cx) {
+    const row = this.pick?.rows[this.pick.sel]; if (!row) return;
+    this.closePicker(cx);
+    run("pane.split", { direction: "right", mod: MOD, props: { file: row.abs } });
+  }
+
+  scrollPreview(dy, cx) {
+    const p = this.pick; if (!p || !this.pv) return;
+    p.pvY = Math.max(0, Math.min(p.pvY + dy, Math.max(0, (this.pvH ?? 0) - (this.pvViewH ?? 0) + 40)));
+    cx.notify();
+  }
+
+  pickKeys(e, cx) {
+    const k = e.key, c = Boolean(e.modifiers?.control), p = this.pick;
+    if (e.modifiers?.platform || e.modifiers?.alt) return;
+    const done = () => cx.stop_propagation();
+    if (!this.pickIn) return done();   // closing
+    if (k === "escape" || (c && k === "c")) { this.closePicker(cx); return done(); }
+    if (k === "enter") { this.pickOpen(cx); return done(); }
+    if (k === "down" || (c && (k === "n" || k === "j"))) { this.pickSelect(p.sel + 1, cx); return done(); }
+    if (k === "up" || (c && (k === "p" || k === "k"))) { this.pickSelect(p.sel - 1, cx); return done(); }
+    if (k === "pagedown" || k === "pageup") { this.pickSelect(p.sel + (k === "pagedown" ? 1 : -1) * Math.max(1, this.pickVis - 1), cx); return done(); }
+    if (c && (k === "d" || k === "u")) { this.scrollPreview((k === "d" ? 1 : -1) * Math.max(120, (this.pvViewH ?? 400) / 2), cx); return done(); }
+    if (c && k === "v") { this.pickSplit(cx); return done(); }
+    // Anything else types into the prompt (it may have lost the keyboard to a click).
+    if (!c && !this.pickTyping) this.pickInput.focus();
+  }
+
+  // A path with its matched characters lit: file name bright, folder dim.
+  pickRow(row, i, t) {
+    const cut = row.rel.lastIndexOf("/") + 1, name = row.rel.slice(cut), dir = row.rel.slice(0, cut);
+    const piece = (r, base, lit, size) => div().text_size(size).text_color(r.hit ? t.accent : base).when(r.hit, el => el.font_semibold()).child(r.text);
+    const sel = i === this.pick.sel, cur = row.abs === this.file;
+    return h_flex().id(`pk-${i}`).absolute().left(0).right(0).top(i * PICK_ROW).h(PICK_ROW).px(12).gap(8).items_center().overflow_hidden().cursor_pointer()
+      .on_click((_e, cx) => { this.pick.sel = i; this.pickOpen(cx); })
+      .child(div().w(8).flex_none().text_size(9).text_color(row.recent ? t.accent : t.border).child(row.recent ? "●" : ""))
+      .child(h_flex().flex_none().children(runs(name, row.pos, cut).map(r => piece(r, sel ? t.foreground : t.muted, true, 13))))
+      .child(h_flex().flex_1().min_w(0).overflow_hidden().children(runs(dir.replace(/\/$/, ""), row.pos, 0).map(r => piece(r, t.dim, false, 11.5))))
+      .when(cur, el => el.child(div().flex_none().px(5).rounded(3).bg(t.surface).text_size(10.5).text_color(t.dim).child("open")));
+  }
+
+  pickPanel(t) {
+    const p = this.pick, list = this.pickList;
+    const W = Math.max(360, Math.min(this.viewW - 40, 1240)), H = Math.max(240, Math.min(this.viewH - 32, 760));
+    const listW = W < 720 ? W : Math.round(Math.min(Math.max(W * 0.4, 320), 460)), pvW = W - listW;
+    const bodyH = H - 46 - 28;   // minus the prompt and the footer
+    this.pickVis = Math.max(3, Math.floor((bodyH - 8) / PICK_ROW));
+    const from = Math.max(0, p.top - 4), to = Math.min(p.rows.length, p.top + this.pickVis + 4);
+    const where = list ? `${list.kind === "git" ? "git" : "folder"} · ${list.root.replace(home(), "~")} · ${list.capped ? `first ${list.files.length} of ${list.total}` : list.files.length} file${list.files.length === 1 ? "" : "s"}` : "listing…";
+    const glide = { duration: 130, easing: "ease-out" };
+    return div().id("md-pick-wrap").absolute().top(0).left(0).size_full()
+      .on_scroll_wheel((e, cx) => { cx.stop_propagation(); this.scrollPreview(-e.delta.y / Z(), cx); })
+      .child(div().id("md-pick-dim").absolute().top(0).left(0).size_full().bg(t.background).opacity(this.pickIn ? 0.6 : 0)
+        .transition("opacity", { duration: 180, easing: "ease-out" }).on_mouse_down("left", (_e, cx) => this.closePicker(cx)))
+      .child(h_flex().absolute().left(0).w_full().justify_center().top(this.pickIn ? 16 : 30)
+        .opacity(this.pickIn).transition("opacity", { duration: 180, easing: "ease-out" }).transition("top", { duration: 220, easing: "ease-out" })
+        .child(v_flex().id("md-pick").w(W).h(H).rounded(12).overflow_hidden().bg(t.popover).border_1().border_color(t.input).shadow_lg()
+          .font_family(BODY()).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .child(h_flex().flex_1().min_h(0)
+            // Left: prompt, then the list.
+            .child(v_flex().w(listW).flex_none().h_full().when(pvW > 0, el => el.border_r(1).border_color(t.border))
+              .child(h_flex().h(46).flex_none().px(14).gap(10).items_center().border_b(1).border_color(t.border)
+                .child(div().text_size(16).text_color(t.accent).font_semibold().child("›"))
+                .child(Input.new(this.pickInput).flex_1().h(30).text_size(14).text_color(t.foreground).font_family(BODY()))
+                .child(div().flex_none().text_size(11.5).text_color(p.query && !p.rows.length && list ? t.blocked : t.dim)
+                  .child(list ? `${p.rows.length ? p.sel + 1 : 0} / ${p.rows.length}` : "")))
+              .child(div().id("md-pick-list").flex_1().min_h(0).relative().overflow_hidden().mt(4)
+                .when(!p.rows.length, el => el.child(div().px(16).py(10).text_size(13).text_color(t.dim)
+                  .child(!list ? "listing markdown files…" : p.query ? "no file matches" : "no markdown files here")))
+                .child(div().absolute().left(0).right(0).top(-p.top * PICK_ROW).h((p.rows.length || 1) * PICK_ROW).transition("top", glide)
+                  .when(p.rows.length > 0, el => el.child(div().id("md-pick-bar").absolute().left(6).right(6).top(p.sel * PICK_ROW + 2).h(PICK_ROW - 4)
+                    .rounded(6).bg(t.selected).border_l(3).border_color(t.accent).transition("top", glide)))
+                  .children(p.rows.slice(from, to).map((row, k) => this.pickRow(row, from + k, t))))))
+            // Right: the preview.
+            .when(pvW > 0, el => el.child(this.previewPane(t, pvW))))
+          .child(h_flex().h(28).flex_none().px(14).gap(12).items_center().border_t(1).border_color(t.border).bg(t.chrome).text_size(11.5).text_color(t.dim)
+            .child(div().flex_1().min_w(0).truncate().child(where))
+            .child(div().flex_none().child("↵ open · ctrl-v split · ctrl-n/p move · ctrl-d/u preview · Esc close")))));
+  }
+
+  previewPane(t, w) {
+    const pv = this.pv, p = this.pick, pad = 26;
+    const head = pv ? pv.abs.replace(home(), "~") : "";
+    let body = [];
+    if (pv && !pv.error) {
+      // block() draws the preview's tokens with the viewer's own renderer; the
+      // flag makes headings and links inert and the ids its own.
+      const colW = this.colW; this.colW = Math.max(120, w - pad * 2); this.pvMode = true;
+      try { body = pv.blocks.map((b, i) => this.block(b, `pv${i}`, t)); } finally { this.colW = colW; this.pvMode = false; }
+    }
+    return v_flex().flex_1().min_w(0).h_full().bg(t.background)
+      .child(h_flex().h(30).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border).bg(t.chrome).text_size(11.5)
+        .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(head))
+        .when(Boolean(pv?.lines), el => el.child(div().flex_none().text_color(t.dim).child(`${pv.lines} lines`))))
+      .child(div().id("md-pick-pv").flex_1().min_h(0).relative().overflow_hidden()
+        .on_size_change((size, cx) => { this.pvViewH = size.height / Z(); })
+        .opacity(this.pvLoading ? 0.45 : 1).transition("opacity", { duration: 140, easing: "ease-out" })
+        .child(v_flex().absolute().left(0).w_full().top(-(p?.pvY ?? 0)).transition("top", { duration: STEP * 1.4, easing: "ease-out" })
+          .px(pad).pt(6).pb(30).text_size(SIZE.body - 1).line_height(1.6).text_color(t.foreground)
+          .on_size_change((size, cx) => { this.pvH = size.height / Z(); })
+          .when(Boolean(pv?.error), el => el.child(div().pt(14).text_color(t.blocked).child(pv.error)))
+          .when(Boolean(pv) && !pv.error && !pv.blocks.length, el => el.child(div().pt(14).text_color(t.dim).italic().child("empty file")))
+          .children(body)
+          .when(Boolean(pv?.more), el => el.child(div().pt(12).text_size(12).text_color(t.dim).italic().child(`… ${pv.more} more block${pv.more === 1 ? "" : "s"}, Enter opens the file`)))));
+  }
+
   // ---- key help (? or h) ----
   // Fades and drifts in; any key fades it out, then it unmounts.
   openHelp(cx) {
@@ -1078,6 +1325,7 @@ export default class Md extends View {
   }
 
   keys(e, cx) {
+    if (this.pick) return this.pickKeys(e, cx);
     if (this.typing) {
       if (e.key === "escape") { this.closeSearch(cx); cx.stop_propagation(); }
       return;
@@ -1100,6 +1348,7 @@ export default class Md extends View {
     if (mod.control) {
       // ctrl-e / ctrl-y: scroll the view a line (40px) without moving the cursor, as in vim.
       if (e.key === "e" || e.key === "y") { this.scrollBy(e.key === "e" ? 40 : -40, cx); this.motion = STEP; return cx.stop_propagation(); }
+      if (e.key === "p") { this.openPicker(cx); return cx.stop_propagation(); }
       const c = { d: half, u: -half, f: page, b: -page }[e.key];
       if (c) { this.moveBy(c, cx); cx.stop_propagation(); }
       return;
@@ -1195,7 +1444,8 @@ export default class Md extends View {
           .child(div().text_size(12).text_color(this.query && !this.matches.length ? t.blocked : t.dim)
             .child(this.query ? (this.matches.length ? `${this.mi + 1}/${this.matches.length}` : "none") : ""))
           .child(div().id("md-search-close").px(4).cursor_pointer().text_color(t.dim).hover(s => s.text_color(t.foreground))
-            .on_click((_e, cx) => this.closeSearch(cx)).child("✕")))))
+            .on_click((_e, cx) => this.closeSearch(cx)).child("✕"))))
+        .when(Boolean(this.pick), el => el.child(this.pickPanel(t))))
       .child(this.statusBar(t));
   }
 
@@ -1215,7 +1465,7 @@ export default class Md extends View {
     const b = this.blocks[this.cursor], lines = (this.src.match(/\n/g)?.length ?? 0) + 1;
     const pct = this.contentH <= this.viewH ? 100 : Math.round(100 * this.offset / (this.contentH - this.viewH));
     const sec = this.sectionOf(this.cursor), secName = sec !== null ? plain(this.blocks[sec].tokens) : "";
-    const mode = this.anchor !== null ? "VISUAL" : this.searching ? "SEARCH" : this.outline ? "OUTLINE" : "NORMAL";
+    const mode = this.pick ? "FIND" : this.anchor !== null ? "VISUAL" : this.searching ? "SEARCH" : this.outline ? "OUTLINE" : "NORMAL";
     return h_flex().h(24).flex_none().px(10).gap(10).items_center().bg(t.chrome).border_t(1).border_color(t.border).text_size(11.5).font_family(BODY())
       .child(div().px(6).rounded(3).font_semibold().bg(mode === "NORMAL" ? t.surface : t.accent).text_color(mode === "NORMAL" ? t.muted : t.accent_foreground).child(mode))
       .when(Boolean(this.pending || this.count), el => el.child(div().text_color(t.dim).child(this.count + this.pending)))

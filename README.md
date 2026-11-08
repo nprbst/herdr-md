@@ -13,8 +13,9 @@ Finally, markdown and the terminal done right: a native markdown pane for the
   theme's colors, and d2l-book `:eqref:` / `:numref:` roles become working
   cross-references.
 - **Moves like vim.** A block cursor with counts (`5j`), smooth glide
-  scrolling, folding (`za`), an outline (`o`), search (`/`), and `.md` links
-  that open in place with `Backspace` to go back.
+  scrolling, folding (`za`), an outline (`o`), search (`/`), a Telescope-style
+  file picker with live preview (`ctrl-p`), and `.md` links that open in place
+  with `Backspace` to go back.
 - **Shows what changed.** Save the file and the pane glides to the first
   edited block and marks each one in the gutter, even across sessions ("3
   changed since you last looked"). `]` / `[` step through them.
@@ -106,6 +107,7 @@ mdh hl FILE --text "a phrase from the doc" --color green  # matches the block co
 mdh hl FILE --lines 90 --add --color red                  # --add keeps the earlier ones
 mdh focus FILE 2 · mdh clear FILE · mdh show FILE
 mdh sel                                                   # what the person pinned with V … p
+mdh pick                                                  # open the file picker in the focused (or only) viewer
 mdh video FILE [N] play|pause|toggle [0:12]               # video N (1-based, default 1)
 mdh video FILE [N] seek 0:12                              # jump; keeps playing or paused
 ```
@@ -126,6 +128,7 @@ block). For Claude Code there's a ready skill in
 | `{` `}` | previous / next heading |
 | `]` `[` · `c` | next / previous changed block · clear the change marks |
 | `o` | outline (`j`/`k`, `Enter`, `Esc`) |
+| `ctrl-p` | find a markdown file: type to fuzzy-filter, `ctrl-n` `ctrl-p` (or `ctrl-j` `ctrl-k`, arrows) move, `Enter` opens here (`Backspace` comes back), `ctrl-v` opens a split, `ctrl-d` `ctrl-u` scroll the preview, `Esc` closes. Lists the git work tree's `.md`/`.markdown` files (tracked and untracked, not ignored), else the folder 4 levels deep; at most 5000; recently opened first |
 | `Backspace` | back after following a link (web links open in your browser; local non-markdown files are only shown in Finder, never launched) |
 | `zz` · `za` `zc` `zo` · `zM` `zR` | center · toggle/close/open fold · fold/unfold all |
 | `V` then `j`/`k` | select blocks |
