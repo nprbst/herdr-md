@@ -105,7 +105,7 @@ if [ $CUT = master ]; then
   beat fold   "Fold any section."
   k z a; pause 1.4; k z a; pause 1.4
   beat search "Search as you read."
-  k /; pause 0.3; run thegrid input type "changed" --window "$WIN"; pause 0.6
+  k /; pause 0.3; run thegrid input type "theme" --window "$WIN"; pause 0.6
   k enter; pause 1.2; k n; pause 1.2; k escape; pause 0.4
   beat links  "Links open in place."
   k G; pause 0.9; k enter; pause 1.6; k backspace; pause 1.4

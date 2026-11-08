@@ -52,7 +52,7 @@ captions match this table.
 | 12–15 | Hold the typeset loss formula | **Real math, typeset.** |
 | 15–19 | `}` → Diagrams, hold Mermaid | **Mermaid, in your theme.** |
 | 19–23 | `za`, pause, `za` | **Fold any section.** |
-| 23–28 | `/` "changed", `Enter`, `n`, `Esc` | **Search as you read.** |
+| 23–28 | `/` "theme", `Enter` (glides to the Note), `n` (the Code paragraph), `Esc` | **Search as you read.** |
 | 28–33 | `G`, `Enter` on the link → second page, `Backspace` | **Links open in place.** |
 | 33–36 | `cp after.md "$F"`: glide up to Reading, three gutter marks, "3 changed" (the one before/after) | **The file changes. See what.** |
 | 36–39 | `]`, `]` | **Jump change to change.** |
@@ -77,7 +77,7 @@ captions match this table.
 ## Verify before recording
 
 - Mod installed as a copy (`scripts/dev-sync.sh`), `mdh` on PATH, Node/npm, Chrome. **Prewarm** math and Mermaid in the final theme: first-use `npm install` and Chrome startup would stall the footage.
-- Rehearse: `scripts/drive-take.sh --dry-run`, then a real run. Unverified until then: theGrid key names (shifted letters and `{ } ] ?` go through `input type`), the outline's starting entry (`j` ×3 should land on Writing math), and `mdh sel` printing the pinned range. Already seen on screen: three changed blocks and the glide to them right after a highlight.
+- Rehearse: `scripts/drive-take.sh --dry-run`, then a real run. Unverified until then: theGrid key names (shifted letters and `{ } ] ?` go through `input type`), the outline's starting entry (`j` ×3 should land on Writing math), `mdh sel` printing the pinned range, and `Backspace` gliding back to Links (heights fix of 2026-11-08, not seen on screen). Already seen on screen: three changed blocks and the glide to them right after a highlight.
 - Captions must say display math is MathJax and inline math is Unicode; remote images are placeholders by design.
 
 ## Existing skills looked at (none used as-is)
