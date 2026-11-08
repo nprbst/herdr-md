@@ -207,11 +207,15 @@ export default class Md extends View {
       this.history.push({ file: this.file, cursor: this.cursor });
       this.jumpAnchor(url.slice(1)); return cx.notify();
     }
-    if (/^[a-z][a-z0-9+.-]*:/i.test(url) && !url.startsWith("file:")) { exec("open", [url]); return; }
+    // Links come from untrusted documents: never hand `open` anything it could
+    // run. Web and mail links go to the browser or mail app; local non-markdown
+    // files are only revealed in Finder; other schemes are refused.
+    if (/^(https?|mailto):/i.test(url)) { exec("open", [url]); return; }
+    if (/^[a-z][a-z0-9+.-]*:/i.test(url) && !url.startsWith("file:")) { this.flash = `not opening ${url.split(":")[0]}: links`; return cx.notify(); }
     const [path, frag = null] = url.replace(/^file:\/\//, "").split("#");
     const abs = path.startsWith("/") ? path : `${dirname(this.file)}/${decodeURIComponent(path)}`.replace(/\/\.\//g, "/");
     if (/\.(md|markdown|mdx)$/i.test(abs)) this.navigate(abs, frag, cx, true);
-    else exec("open", [abs]);
+    else { exec("open", ["-R", abs]); this.flash = "shown in Finder"; cx.notify(); }
   }
 
   navigate(file, frag, cx, push) {
