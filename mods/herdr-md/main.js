@@ -14,6 +14,7 @@ import { marked, splitChunks, capSource, refDefs, lexChunk, blocks, LEX_MAX } fr
 import { inlineMath } from "./tex.js";
 import { hash as bhash, diffBlocks, slug, labelOf, inlineRoles, alertOf, ALERTS } from "./doc.js";
 import { listFiles, parseRecent, pushRecent, rank, runs, previewSource } from "./picker.js";
+import { VIDEO_FPS, stopped, command, tick } from "./video.js";
 
 // Figures (display math, Mermaid) are rendered by render/render.mjs into
 // .cache/r/<hash>.{svg,png}; the hash covers the source and the colors used.
@@ -51,57 +52,28 @@ const HELP = [[
 // .cache/v/<hash>/, played by a nested view that swaps frames on a timer.
 // Capped at the first VIDEO_MAX seconds, VIDEO_FPS frames a second, VIDEO_W px wide.
 const isVideo = href => /\.(mp4|mov|m4v|webm)$/i.test(href.split(/[?#]/)[0]);
-const VIDEO_FPS = 10, VIDEO_MAX = 20, VIDEO_W = 720;
+const VIDEO_MAX = 20, VIDEO_W = 720;
 const clock = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
+// A video block: draws the frame the viewer's clock picked (props.st, video.js).
 class Video extends View {
-  init(p, cx) {
-    this.p = p; this.i = 0; this.playing = false; this.seq = null;
-    // One clock for the view's life; it does nothing while paused.
-    // Frames follow the wall clock (the timer only polls), so a slow render
-    // drops a frame instead of slowing the clip down.
-    cx.timer.every(1000 / VIDEO_FPS / 3, cx => {
-      if (!this.playing || !this.p.meta.n) return;
-      const n = this.p.meta.n, i = Math.min(n - 1, Math.floor((Date.now() - this.t0) * VIDEO_FPS / 1000));
-      if (i === this.i && i < n - 1) return;
-      this.i = i; if (i >= n - 1) this.playing = false;
-      cx.notify();
-    });
-  }
-
-  // Commands from the viewer (Enter, mdh video): { state: toggle|play|pause|seek, t, seq }.
-  update(p) {
-    this.p = p; const c = p.cmd;
-    if (!c || c.seq === this.seq) return;
-    this.seq = c.seq;
-    const n = p.meta.n, at = t => Math.max(0, Math.min(n - 1, Math.round(t * VIDEO_FPS)));
-    if (typeof c.t === "number") this.i = at(c.t);
-    if (c.state === "toggle") this.setPlaying(!this.playing);
-    else if (c.state === "play") this.setPlaying(true, typeof c.t !== "number");
-    else if (c.state === "pause") this.playing = false;
-    else if (c.state === "seek") this.setPlaying(this.playing, false);
-  }
-
-  // Playing from the last frame starts over (unless a time was given).
-  setPlaying(on, rewind = true) {
-    if (on && rewind && this.i >= this.p.meta.n - 1) this.i = 0;
-    this.playing = on; this.t0 = Date.now() - this.i * 1000 / VIDEO_FPS;
-  }
+  init(p) { this.p = p; }
+  update(p) { this.p = p; }
 
   render(cx) {
-    const { dir, meta, w, h, t } = this.p, n = meta.n;
+    const { dir, meta, w, h, t, st } = this.p, n = meta.n, i = st.i, playing = st.playing && n > 0;
     const frame = i => n ? `${dir}/f${String(Math.max(0, Math.min(n - 1, i)) + 1).padStart(4, "0")}.jpg` : `${dir}/poster.jpg`;
     const pic = i => image(frame(i)).absolute().top(0).left(0).w(w).h(h);
     // Next frame at the bottom (so it decodes before it's needed), previous frame
     // under the current one (shown if the current one hasn't decoded yet).
     const shown = Math.min(meta.dur, VIDEO_MAX), cut = meta.dur > VIDEO_MAX + 0.5;
     return div().id("video").relative().w(w).h(h).rounded(8).overflow_hidden().bg("#000000")
-      .child(pic(this.i + 1)).child(pic(this.i - 1)).child(pic(this.i))
-      .child(div().absolute().left(0).bottom(0).h(3).bg(t.accent).w(n > 1 ? w * this.i / (n - 1) : 0))
+      .child(pic(i + 1)).child(pic(i - 1)).child(pic(i))
+      .child(div().absolute().left(0).bottom(0).h(3).bg(t.accent).w(n > 1 ? w * i / (n - 1) : 0))
       .child(h_flex().absolute().left(8).bottom(8).gap(8).items_center().px(8).py(1).rounded(6).bg("#000000aa").text_size(12).text_color("#ffffff")
-        .child(div().child(this.playing ? "❚❚" : "▶"))
-        .child(div().child(`${clock(this.i / VIDEO_FPS)} / ${clock(shown)}${cut ? " (first " + VIDEO_MAX + "s)" : ""}`)))
-      .when(!this.playing, el => el.child(h_flex().absolute().top(0).left(0).w(w).h(h).items_center().justify_center()
+        .child(div().child(playing ? "❚❚" : "▶"))
+        .child(div().child(`${clock(i / VIDEO_FPS)} / ${clock(shown)}${cut ? " (first " + VIDEO_MAX + "s)" : ""}`)))
+      .when(!playing, el => el.child(h_flex().absolute().top(0).left(0).w(w).h(h).items_center().justify_center()
         .child(h_flex().h(56).min_w(56).px(this.p.loading ? 16 : 0).rounded(28).bg("#000000aa").items_center().justify_center().text_size(this.p.loading ? 14 : 22).text_color("#ffffff")
           .child(this.p.loading ? "preparing frames…" : "▶"))));
   }
@@ -553,7 +525,7 @@ export default class Md extends View {
       if (st.code !== 0) { v.missing = true; continue; }
       const key = fnv(v.abs + st.stdout.trim()), dir = `${CACHE}/v/${key}`;
       if (v.dir === dir && v.meta) continue;
-      v.dir = dir; v.absDir = `${home()}/.config/herdr-app/${dir}`; v.meta = null; v.missing = false; v.error = null; v.extracting = null; cx.notify();
+      v.dir = dir; v.absDir = `${home()}/.config/herdr-app/${dir}`; v.meta = null; v.st = stopped(); v.missing = false; v.error = null; v.extracting = null; cx.notify();
       let meta = null;
       try { meta = JSON.parse(await readTextFile(`${v.absDir}/meta.json`) ?? "null"); } catch {}
       if (!meta) {
@@ -601,8 +573,9 @@ export default class Md extends View {
       if (r.code !== 0 || !(n > 0)) { v.error = (r.stderr || "ffmpeg failed").trim().split("\n").pop().slice(0, 160); cx.notify(); return; }
       v.meta = { ...m, n };
       exec("sh", ["-c", 'printf %s "$2" > "$1/meta.json"', "meta", v.absDir, JSON.stringify(v.meta)]);
-      if (v.cmd) v.cmd = { ...v.cmd, seq: v.cmd.seq + 1 };   // replay the command that asked to play
+      if (v.cmd) v.st = command(v.st, v.cmd, n, Date.now());   // the command that asked to play
       v.entity.set_props(this.videoProps(v)); cx.notify(v.entity); cx.notify();
+      this.videoClock(cx);
     });
   }
 
@@ -612,7 +585,7 @@ export default class Md extends View {
     return { w, h };
   }
 
-  videoProps(v) { return { dir: v.dir, meta: v.meta, ...this.videoSize(v), t: theme(), cmd: v.meta.n ? v.cmd : null, loading: Boolean(v.extracting) }; }
+  videoProps(v) { return { dir: v.dir, meta: v.meta, ...this.videoSize(v), t: theme(), st: v.st ??= stopped(), loading: Boolean(v.extracting) }; }
 
   applyVideo(cx) {
     const c = this.pendingVideo; if (!c) return;
@@ -626,10 +599,29 @@ export default class Md extends View {
   // Send a play/pause/seek command to video n (0-based, document order).
   videoCmd(n, state, t, cx) {
     const v = this.videos[this.videoList?.[n]]; if (!v?.entity) return false;
-    v.cmd = { state, t, seq: (v.cmd?.seq ?? 0) + 1 };
+    v.cmd = { state, t };
     if (!v.meta.n && state !== "pause") { this.extractFrames(v, cx); return true; }
+    v.st = command(v.st ?? stopped(), v.cmd, v.meta.n, Date.now());
     v.entity.set_props(this.videoProps(v)); cx.notify(v.entity);
+    this.videoClock(cx);
     return true;
+  }
+
+  // One clock for every video, running only while one plays: it polls every
+  // third of a frame and redraws a video only when its frame changes.
+  videoClock(cx) {
+    const playing = () => Object.values(this.videos).some(v => v.st?.playing && v.meta?.n);
+    if (!playing()) { this.clock?.cancel(); this.clock = null; return; }
+    if (this.clock) return;
+    this.clock = cx.timer.every(1000 / VIDEO_FPS / 3, cx => {
+      const now = Date.now();
+      for (const v of Object.values(this.videos)) {
+        if (!v.st?.playing || !v.entity || !v.meta?.n) continue;
+        const st = tick(v.st, v.meta.n, now);
+        if (st !== v.st) { v.st = st; v.entity.set_props(this.videoProps(v)); cx.notify(v.entity); }
+      }
+      if (!playing()) { this.clock?.cancel(); this.clock = null; }
+    });
   }
 
   resizeVideos() { for (const v of Object.values(this.videos)) if (v.entity && v.meta) v.entity.set_props(this.videoProps(v)); }
