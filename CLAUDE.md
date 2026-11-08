@@ -22,6 +22,7 @@ Herdr's own docs are the truth: `~/.config/herdr-app/AGENTS.md`, `gpui-kit.d.ts`
 - `pbcopy` needs `LANG=en_US.UTF-8` or non-ASCII is mangled.
 - Links come from untrusted docs: only http(s)/mailto go to `open`; local files are `open -R`.
 - theGrid's `bfd` hotkey daemon swallows `cmd-h`/`cmd-l` system-wide unless `bfd.yaml` has an `apps: Herdr:` override.
+- A long-running main window can exhaust its shared mod JS runtime: every mod, built-ins too, then shows "did not load: Null\"null\"" until Herdr restarts. Bound anything that grows with file size (marked.lexer is superlinear in QuickJS); verify in an isolated Herdr (HERDR_APP_HOME=~/.cache/hdt), not by reloading.
 
 ## Commits
 
