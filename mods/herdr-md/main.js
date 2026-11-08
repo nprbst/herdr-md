@@ -1072,7 +1072,7 @@ export default class Md extends View {
   rerank(cx, keep) {
     const p = this.pick; if (!p) return;
     const was = p.rows[p.sel]?.abs;
-    p.rows = this.pickList ? rank(p.query, this.pickList, this.recent, this.file) : [];
+    p.rows = this.pickList ? rank(p.query, this.pickList, this.recent, this.file, Infinity) : [];
     const at = keep && was ? p.rows.findIndex(r => r.abs === was) : -1;
     this.pickSelect(at >= 0 ? at : 0, cx);
   }
@@ -1135,7 +1135,7 @@ export default class Md extends View {
   pickOpen(cx) {
     const row = this.pick?.rows[this.pick.sel]; if (!row) return;
     this.closePicker(cx);
-    this.navigate(row.abs, null, cx, true);
+    if (row.abs !== this.file) this.navigate(row.abs, null, cx, true);
   }
 
   // ctrl-v: a new viewer to the right of this one, this one unchanged.
