@@ -132,7 +132,7 @@ if [ $CUT = master ]; then
   agent "mdh hl '$F' --text 'Select a few blocks' --note 'Pin the lines you mean, and I read exactly those.'"
   pause 4
   beat pin    "You point back."
-  focus_viewer; k V j p; pause 1.6
+  focus_viewer; k n V p; pause 1.6                              # n: cursor onto the highlight (one block)
   beat sel    "Same file. Exact lines."
   agent "mdh sel"; pause 3
   beat cta    "add the mod github.com/ryanthedev/herdr-md"
