@@ -695,7 +695,10 @@ export default class Md extends View {
   }
 
   figure(tok, id, t) {
-    const f = this.figs[tok.fig] ?? { pending: true }, math = isMath(tok);
+    // A theme switch back to a look already rendered shows that image at once,
+    // without waiting a frame for renderFigures to repoint tok.fig.
+    const live = this.figs[this.figKey(tok)];
+    const f = (live?.path ? live : this.figs[tok.fig]) ?? { pending: true }, math = isMath(tok);
     if (f.path) {
       const max = this.colW - (math ? 0 : 34);
       let w = f.w, h = f.h; if (w > max) { h = Math.round(h * max / w); w = max; }
