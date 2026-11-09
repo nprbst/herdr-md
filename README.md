@@ -3,9 +3,13 @@
 Finally, markdown and the terminal done right: a native markdown pane for the
 [Herdr](https://herdr.dev) desktop app, drawn in your theme next to your shell.
 
-[![herdr-md: the 60-second launch video](docs/launch/poster.png)](https://ryan.upubli.sh/herdr-md/)
+> [!IMPORTANT]
+> herdr-md is a mod for the **Herdr desktop app** (the native macOS window). It
+> doesn't run in `herdr`, the terminal app and CLI.
 
-[Watch the 60-second video](https://ryan.upubli.sh/herdr-md/)
+https://github.com/user-attachments/assets/0da11259-cf8d-490e-943c-72fb9807540d
+
+[Watch the full 60-second video](https://ryan.upubli.sh/herdr-md/)
 
 - **Reads like a real document.** Heading sizes and colors from your Herdr
   theme, your terminal font, tables, task lists, `> [!NOTE]` callouts, and code
