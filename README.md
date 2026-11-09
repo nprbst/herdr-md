@@ -3,7 +3,9 @@
 Finally, markdown and the terminal done right: a native markdown pane for the
 [Herdr](https://herdr.dev) desktop app, drawn in your theme next to your shell.
 
-![herdr-md: headings, a callout, tasks and a table rendered in a Herdr pane](preview.png)
+[![herdr-md: the 60-second launch video](docs/launch/poster.png)](https://ryan.upubli.sh/herdr-md/)
+
+[Watch the 60-second video](https://ryan.upubli.sh/herdr-md/)
 
 - **Reads like a real document.** Heading sizes and colors from your Herdr
   theme, your terminal font, tables, task lists, `> [!NOTE]` callouts, and code

@@ -1,11 +1,11 @@
 # X thread (4 posts)
 
-Counts are X-weighted (each URL counts 23), measured by script. The `[NEED]`
+Counts are X-weighted (each URL counts 23), measured by script. The `[Attach]`
 line is not posted.
 
 ## 1/4
 
-[NEED: video URL, short cut ~24s, square]
+[Attach: `~/Movies/herdr-md-launch/herdr-md-short.mp4` as a native upload so it autoplays. Also hosted at https://ryan.upubli.sh/herdr-md/herdr-md-short.mp4]
 
 Finally, markdown and the terminal done right.
 

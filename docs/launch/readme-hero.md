@@ -8,9 +8,7 @@ preview image and feature bullets. Everything from `## Install` down stays.
 Finally, markdown and the terminal done right: a native markdown pane for the
 [Herdr](https://herdr.dev) desktop app, drawn in your theme next to your shell.
 
-[![herdr-md: the launch video](docs/launch/poster.png)](https://example.com/NEED-video-url)
-
-[NEED: video URL for the link above]
+[![herdr-md: the launch video](docs/launch/poster.png)](https://ryan.upubli.sh/herdr-md/)
 
 - **Reads like a real document.** Heading sizes and colors from your Herdr
   theme, your terminal font, tables, task lists, `> [!NOTE]` callouts, and code

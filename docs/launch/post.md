@@ -4,7 +4,9 @@ Run `mdh open README.md` and the file opens in a pane beside your shell in the
 [Herdr](https://herdr.dev) desktop app, drawn natively: real heading sizes in
 your theme's colors, body text in your terminal font. It works.
 
-[NEED: video URL, 60s master]
+[![herdr-md: the 60-second launch video](poster.png)](https://ryan.upubli.sh/herdr-md/)
+
+Watch it: https://ryan.upubli.sh/herdr-md/
 
 ## What you see
 
