@@ -15,15 +15,15 @@ on the person's PATH, since opening files and every agent feature go through it:
 
 - A pane (opened with `pane.split {mod: "herdr-md", props: {file}}`) filling with the document on the theme's `background`, content column at most 960px wide, centered, 64px side padding, 28px top.
 - Body text in `settings().font_family` (the person's terminal font; Geist if unset) at 15px, line height 1.65. Headings bold: H1 34px `ansi4`, H2 26px `ansi5`, H3 21px `ansi6`, H4 18px `ansi2`, H5 16px `ansi3`, H6 15px `muted`; H1/H2 get a 1px `border` rule.
-- A gutter left of each block with its first source line number, 12px `dim`; the cursor block's number in `accent`, semibold, blinking by default (about 1s on, 1s off).
+- A gutter left of each block with its first source line number, 12px `dim`; the cursor block's number in `accent`, semibold. By default its color blinks between `accent` and `dim` (about 1s each); the digits never move or vanish.
 - Code blocks: rounded 8px `surface` card with a 28px header (language left, `copy` right) over a read-only `Editor` with syntax colors from `ansi1..6`, at most 40 lines tall.
 - Tables: rounded bordered card, header row on `surface` in `ansi4`, alternate rows on `canvas`; column widths weighted by content length.
 - Lists: bullets `•` / numbers in `accent`; tasks `✓` (`ansi2`, text dimmed) / `○`.
 - Blockquotes: 3px `ansi5` left bar, `muted` text.
 - Local images at natural size, fitted to the column, at most 560px tall, with the alt text as a caption. Remote images: a placeholder (never fetched).
 - `$$…$$` display math: a MathJax SVG in `foreground`, centered. Inline `$…$`: Unicode in italics. ` ```mermaid `: a PNG on a `surface` card in theme colors.
-- Agent highlights: the covered blocks get a 3px left bar and a 12%-alpha tint in the highlight color, and a note card under the last block (bordered in that color, `✦ Claude` label, markdown body; numbered when there are several).
-- The cursor block: a layer drawn behind the block (so it never shifts the text): `hover` background with a 3px `accent` bar by default. `C` cycles the look (bar + highlight, highlight, a tinted `accent` pill behind the number, lift: `raised` background with `shadow_md`, pill + highlight); `B` cycles the motion (blink the number by default; steady; pulse the number, highlight or both; grow the highlight 3px a side, alone or with a pulse; blink the highlight or both). The choice is saved in `~/.cache/herdr-md/cursor.json`. With numbers off, the pill look falls back to lift. Visual selection: `selection` background. A sent selection: `ansi4` tint and bar.
+- Agent highlights: the covered blocks get a 12%-alpha tint in the highlight color (no left bar), and a note card under the last block (bordered in that color, `✦ Claude` label, markdown body; numbered when there are several).
+- The cursor block: a layer drawn behind the block (so it never shifts the text): `hover` background, no left bar (nothing that highlights a block draws one). `C` cycles the look (highlight, a tinted `accent` pill behind the number, lift: `raised` background with `shadow_md`, pill + highlight); `B` cycles the motion (blink the number by default; steady; pulse the number, highlight or both; grow the highlight 3px a side, alone or with a pulse; blink the highlight or both). The choice is saved in `~/.cache/herdr-md/cursor.json`. With numbers off, the pill look falls back to lift. Visual selection: `selection` background. A sent selection: `ansi4` tint.
 - A 6px scrollbar thumb on the right; a bottom-left status (`VISUAL` badge, pending keys, brief messages like "copied").
 - Search: a 340×38 floating box top right (`⌕`, input, `3/12` counter, `✕`).
 

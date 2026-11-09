@@ -169,8 +169,8 @@ block). For Claude Code there's a ready skill in
 | in a zoomed figure: `h` `j` `k` `l` or drag or scroll · `+` `-` or ctrl-scroll · `0` · `Esc` | pan · zoom (about the pointer) · fit · close |
 | `/` then `Enter` / `Shift-Enter`, `n` `N` | search; next / previous match (or highlight) |
 | `#` | line numbers: absolute → relative (vim hybrid: the cursor shows its line, the rest how many `j`/`k` away) → off |
-| `C` | cursor look: bar + highlight → highlight → number badge → lift → badge + highlight (saved for every viewer) |
-| `B` | cursor motion (default: blink the number): steady, pulse (number, highlight or both), grow the highlight (alone or with a pulse), blink (number, highlight or both); it stays still while moving |
+| `C` | cursor look: highlight → number badge → lift → badge + highlight (saved for every viewer) |
+| `B` | cursor motion (default: the number blinks its color, it never moves or vanishes): steady, pulse (number, highlight or both), grow the highlight (alone or with a pulse), blink (number, highlight or both); it stays still while moving |
 | `Esc` | leave visual mode, close search, clear the sent selection |
 | `?` or `h` | key help: `/` searches it (`Enter` back to scrolling, `Esc` clears); `j` `k`, `ctrl-d` `ctrl-u`, `g` `G` or the wheel scroll it; any other key closes it |
 | `q` | close the viewer |

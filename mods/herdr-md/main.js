@@ -45,7 +45,7 @@ const HELP = [[
   ["READ", [["ctrl-p", "find a markdown file, with preview"], ["o", "outline"], ["Enter", "fold a heading, follow a link, zoom a figure, play a video"], ["O", "open a video in QuickTime"], ["Backspace", "back after a link"],
     ["za zc zo", "toggle / close / open fold"], ["zM zR", "fold / unfold all"], ["] [", "next / previous change"], ["c", "clear change marks"],
     ["/", "search"], ["n N", "next / previous match or note"], ["#", "line numbers: absolute, relative, off"],
-    ["C", "cursor look: bar, highlight, number badge, lift"], ["B", "cursor motion: blink (default), steady, pulse, grow"]]],
+    ["C", "cursor look: highlight, number badge, lift"], ["B", "cursor motion: blink (default), steady, pulse, grow"]]],
   ["ZOOM (Enter on a diagram or image)", [["h j k l", "pan (or drag, or scroll)"], ["+ -", "zoom in / out (or ctrl-scroll)"], ["0", "fit"], ["Esc", "close"]]],
   ["VIEWER", [["? h", "this help"], ["q", "close the viewer"]]],
 ]];
@@ -98,6 +98,15 @@ const CURSOR_PREF = () => `${NOTES()}/cursor.json`;
 const PULSE = { from: 1, to: 0.35, period: 1800, easing: "ease-in-out" };
 const BLINK = { from: 5, to: -4, period: 2120, easing: "linear" };
 const GROW = 3, REST = 700;
+// The gutter number. The cursor's stays put: with a motion, a dim copy sits
+// underneath and the accent copy on top pulses or blinks, so only its color changes.
+function numLabel(i, cp, label, t) {
+  const box = div().id(`num-${i}`).relative().when(Boolean(cp?.badge), el => el.px(6).mr(-6).rounded(4).bg(t.accent + "26"));
+  if (!cp?.numAnim) return box.child(label);
+  return box.text_color(t.dim).child(label)
+    .child(animate(h_flex().justify_center().absolute().top(0).bottom(0).left(0).right(0).text_color(t.accent).child(label), cp.numAnim));
+}
+
 function animate(el, a, size) {
   if (!a) return el;
   if (a === "blink") return el.loop("opacity", BLINK);
@@ -140,7 +149,7 @@ export default class Md extends View {
     this.help = false; this.helpIn = 0; this.zoom = null; this.viewW = 0;
     this.query = ""; this.matches = []; this.mi = 0; this.searching = false; this.typing = false;
     // Vim-ish cursor: one rendered block is one "line". anchor !== null means visual mode.
-    this.cursor = 0; this.anchor = null; this.pending = ""; this.count = ""; this.numbers = "absolute"; this.look = "bar"; this.cmotion = "blink number"; this.resting = true; this.restAt = 0; this.restGen = 0; this.picked = null; this.src = ""; this.lines = 0;
+    this.cursor = 0; this.anchor = null; this.pending = ""; this.count = ""; this.numbers = "absolute"; this.look = "highlight"; this.cmotion = "blink number"; this.resting = true; this.restAt = 0; this.restGen = 0; this.picked = null; this.src = ""; this.lines = 0;
     this.handle = cx.focus_handle();
     this.input = InputState.new({ value: "", placeholder: "Search" });
     this.input.on("change", (_e, cx) => { this.search(this.input.value()); this.aimAt(this.matches[this.mi = 0]); cx.notify(); });
@@ -895,23 +904,21 @@ export default class Md extends View {
       .when(changed, el => el.child(div().absolute().left(-12).top(gone ? 26 : 4).bottom(4).w(3).rounded(2).bg(t.ansi2)))
       .when(this.numbers !== "off", el => el.child(h_flex().justify_end().absolute().left(-PAD - 12).top(numTop).w(PAD - 14).font_family(BODY()).text_size(12).line_height(1.6)
         .text_color(cur ? t.accent : t.dim).when(cur, el => el.font_semibold())
-        .child(div().id(`num-${i}`).when(cur && cp.badge, el => el.px(6).mr(-6).rounded(4).bg(t.accent + "26")).when(cur, el => animate(el, cp.numAnim))
-          .child(gutterLabel(this.numbers, i, this.cursor, tok.from, this.ord)))))
+        .child(numLabel(i, cur ? cp : null, gutterLabel(this.numbers, i, this.cursor, tok.from, this.ord), t))))
       .on_size_change((size, cx) => { if (this.heights[i] !== size.height / Z()) { this.heights[i] = size.height / Z(); this.reaim(); cx.notify(); } })
       .child(div().id(`blk-${i}`).relative().px(14).mx(-14).rounded(6)
         .when(cur, el => el.on_size_change((size, cx) => {
           const w = size.width, h = size.height, c = this.curSize;   // zoomed px, as .loop wants
           if (c?.i !== i || c.w !== w || c.h !== h) { this.curSize = { i, w, h }; cx.notify(); }
         }))
-        .when(Boolean(m), el => el.bg(color + "1f").border_l(3).border_color(color))
-        .when(Boolean(picked) && !m, el => el.bg(t.ansi4 + "1c").border_l(3).border_color(t.ansi4))
+        .when(Boolean(m), el => el.bg(color + "1f"))
+        .when(Boolean(picked) && !m, el => el.bg(t.ansi4 + "1c"))
         .when(sel, el => el.bg(t.selection))
-        .when(!m && hit, el => el.bg(t.accent + (current ? "2e" : "12")).when(current, el => el.border_l(3).border_color(t.accent)))
+        .when(!m && hit, el => el.bg(t.accent + (current ? "2e" : "12")))
         // The cursor: a layer behind the block, so it can pulse or blink without
-        // fading the text, and its bar never pushes the text sideways.
+        // fading the text.
         .when(cur && !sel && Boolean(cp.row), el => el.child(animate(div().id(`cur-${i}`).absolute().top(0).left(0).when(!grows, el => el.bottom(0).right(0)).rounded(6)
-          .when(cp.row === "lift", el => el.bg(t.raised).shadow_md()).when(cp.row !== "lift", el => el.bg(t.hover))
-          .when(cp.row === "bar", el => el.child(div().absolute().left(0).top(0).bottom(0).w(3).rounded_l(6).bg(t.accent))), cp.rowAnim, size)))
+          .when(cp.row === "lift", el => el.bg(t.raised).shadow_md()).when(cp.row !== "lift", el => el.bg(t.hover)), cp.rowAnim, size)))
         .child(this.block(tok, i, t)))
       .when(Boolean(m?.note) && m?.last, el => el.child(
         h_flex().mt(6).mb(10).gap(10).items_start().px(14).py(10).rounded(8).bg(t.surface).border_1().border_color(color)
@@ -1285,7 +1292,7 @@ export default class Md extends View {
                   .child(!list ? "listing markdown files…" : p.query ? "no file matches" : "no markdown files here")))
                 .child(div().absolute().left(0).right(0).top(-p.top * PICK_ROW).h((p.rows.length || 1) * PICK_ROW).transition("top", glide)
                   .when(p.rows.length > 0, el => el.child(div().id("md-pick-bar").absolute().left(6).right(6).top(p.sel * PICK_ROW + 2).h(PICK_ROW - 4)
-                    .rounded(6).bg(t.selected).border_l(3).border_color(t.accent).transition("top", glide)))
+                    .rounded(6).bg(t.selected).transition("top", glide)))
                   .children(p.rows.slice(from, to).map((row, k) => this.pickRow(row, from + k, t))))))
             // Right: the preview.
             .when(pvW > 0, el => el.child(this.previewPane(t, pvW))))

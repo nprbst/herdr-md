@@ -88,7 +88,7 @@ export function gutterLabel(mode, i, cursor, line, ord) {
 
 // The cursor's look (`C` cycles) and motion (`B` cycles), saved in
 // ~/.cache/herdr-md/cursor.json so every viewer uses the last choice.
-export const CURSOR_LOOKS = ["bar", "highlight", "badge", "lift", "badge+highlight"];
+export const CURSOR_LOOKS = ["highlight", "badge", "lift", "badge+highlight"];
 // Each motion: what the number and the highlight do (null: stay still).
 const MOTIONS = {
   "steady": {},
@@ -97,7 +97,7 @@ const MOTIONS = {
   "blink number": { num: "blink" }, "blink highlight": { row: "blink" }, "blink both": { num: "blink", row: "blink" },
 };
 export const CURSOR_MOTIONS = Object.keys(MOTIONS);
-export const LOOK_NAMES = { bar: "bar + highlight", highlight: "highlight", badge: "number badge", lift: "lift", "badge+highlight": "number badge + highlight" };
+export const LOOK_NAMES = { highlight: "highlight", badge: "number badge", lift: "lift", "badge+highlight": "number badge + highlight" };
 const after = (list, x) => list[(list.indexOf(x) + 1) % list.length];
 export const nextLook = look => after(CURSOR_LOOKS, look);
 export const nextMotion = motion => after(CURSOR_MOTIONS, motion);
@@ -105,17 +105,17 @@ export const nextMotion = motion => after(CURSOR_MOTIONS, motion);
 export function parseCursorPref(text) {
   let p = null; try { p = JSON.parse(text); } catch { /* missing or bad: defaults */ }
   return {
-    look: CURSOR_LOOKS.includes(p?.look) ? p.look : "bar",
+    look: CURSOR_LOOKS.includes(p?.look) ? p.look : "highlight",
     motion: CURSOR_MOTIONS.includes(p?.motion) ? p.motion : "blink number",
   };
 }
 
-// What to draw for the cursor block. row: "bar" | "tint" | "lift" | null (the
+// What to draw for the cursor block. row: "tint" | "lift" | null (the
 // layer behind the block); badge: a pill behind the line number. With numbers
 // off a badge can't show, so the block lifts instead and the cursor never vanishes.
 // numAnim: null | "pulse" | "blink"; rowAnim: also "grow" | "grow+pulse".
 export function cursorParts(look, motion, numbersOn) {
-  let row = { bar: "bar", highlight: "tint", lift: "lift", "badge+highlight": "tint" }[look] ?? null;
+  let row = { highlight: "tint", lift: "lift", "badge+highlight": "tint" }[look] ?? null;
   let badge = numbersOn && (look === "badge" || look === "badge+highlight");
   if (!numbersOn && look === "badge") row = "lift";
   const m = MOTIONS[motion] ?? {};
