@@ -41,17 +41,18 @@ async function ownedByMe(exec, path) {
   return Boolean(uid && st?.code === 0 && st.stdout.trim() === uid);
 }
 
-export async function listFiles(exec, dir) {
+// opts: { noIgnore: also git-ignored files, depth: how deep a folder (no git) is searched }.
+export async function listFiles(exec, dir, { noIgnore = false, depth = FIND_DEPTH } = {}) {
   const top = await exec("git", [...GIT_SAFE, "-C", dir, "rev-parse", "--show-cdup"]).catch(() => null);
   if (top && top.code === 0) {
     const root = join(dir, top.stdout.trim());
     if (await ownedByMe(exec, root)) {
-      const r = await exec("git", [...GIT_SAFE, "-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard",
+      const r = await exec("git", [...GIT_SAFE, "-C", root, "ls-files", "-z", "--cached", "--others", ...(noIgnore ? [] : ["--exclude-standard"]),
         "--", ":(icase)*.md", ":(icase)*.markdown"]).catch(() => null);
       if (r && r.code === 0) return finish(root, "git", [...new Set(r.stdout.split("\0"))].filter(p => p && MD.test(p) && !skipped(p)));
     }
   }
-  const r = await exec("find", [dir, "-maxdepth", String(FIND_DEPTH),
+  const r = await exec("find", [dir, "-maxdepth", String(depth),
     "(", "-name", "node_modules", "-o", "-name", ".git", "-o", "-name", ".cache", "-o", "-name", "Library", "-o", "-name", ".Trash", ")", "-prune",
     "-o", "-type", "f", "(", "-iname", "*.md", "-o", "-iname", "*.markdown", ")", "-print"]).catch(() => ({ stdout: "" }));
   const base = dir.replace(/\/+$/, "");
@@ -63,6 +64,128 @@ function finish(root, kind, files) {
   files.sort(byDepth);
   return { root, kind, files: files.slice(0, MAX_FILES), total: files.length, capped: files.length > MAX_FILES };
 }
+
+// ---- options (~/.config/herdr-md/picker.json) ----
+// Telescope's option names, so a Neovim config reads the same. `files: false`
+// (folders only) comes from telescope-file-browser. null means "as before":
+// with no file, the picker looks and lists exactly as it always has.
+export const PICK_DEFAULTS = {
+  layout_strategy: "horizontal",   // "horizontal" (list | preview) or "center" (one small box)
+  layout_config: {},               // width, height, preview_width, preview_height, prompt_position; per strategy too
+  previewer: null,                 // null: on for horizontal, off for center
+  files: true,                     // false: list folders (that hold markdown) instead of files
+  hidden: true,                    // dot files and dot folders
+  no_ignore: false,                // git-ignored files too
+  file_ignore_patterns: [],        // regexes (JavaScript, not Lua) tested against the relative path
+  path_display: [],                // "tail" (name only) or "shorten" (folders cut to one letter)
+  prompt_prefix: "›",
+  depth: FIND_DEPTH,               // how deep a folder without git is searched
+};
+const STRATEGIES = ["horizontal", "center"], SIZES = ["width", "height", "preview_width", "preview_height"];
+
+// picker.json's text → { opts, error }. Bad JSON leaves every default; a bad
+// value leaves that one default. error names the first problem, for the footer.
+export function parseConfig(text) {
+  const opts = { ...PICK_DEFAULTS, layout_config: {}, ignore: [] }, errs = [];
+  if (text == null || !text.trim()) return { opts, error: null };
+  let c;
+  try { c = JSON.parse(text); } catch (e) { return { opts, error: `picker.json: ${String(e.message || e).slice(0, 80)}` }; }
+  if (!c || typeof c !== "object" || Array.isArray(c)) return { opts, error: "picker.json: expected an object { … }" };
+  const bad = (k, want) => errs.push(`picker.json: ${k} should be ${want}`);
+  const take = (k, ok, want) => { if (k in c) { if (ok(c[k])) opts[k] = c[k]; else bad(k, want); } };
+  take("layout_strategy", v => STRATEGIES.includes(v), `"horizontal" or "center"`);
+  take("previewer", v => typeof v === "boolean" || v === null, "true or false");
+  for (const k of ["files", "hidden", "no_ignore"]) take(k, v => typeof v === "boolean", "true or false");
+  take("prompt_prefix", v => typeof v === "string" && v.length <= 8, "a short string");
+  take("depth", v => Number.isInteger(v) && v >= 1 && v <= 12, "a whole number from 1 to 12");
+  take("path_display", v => Array.isArray(v) && v.every(x => x === "tail" || x === "shorten"), `a list of "tail" or "shorten"`);
+  take("file_ignore_patterns", v => Array.isArray(v) && v.every(x => typeof x === "string"), "a list of strings");
+  for (const p of opts.file_ignore_patterns) {
+    try { opts.ignore.push(new RegExp(p)); } catch { bad(`file_ignore_patterns "${p}"`, "a valid regex"); }
+  }
+  // layout_config: flat sizes apply to every strategy; { center: { … } } to one.
+  const lc = c.layout_config;
+  if (lc !== undefined) {
+    if (!lc || typeof lc !== "object" || Array.isArray(lc)) bad("layout_config", "an object");
+    else {
+      const sizes = (o, at, into) => {
+        for (const [k, v] of Object.entries(o)) {
+          if (STRATEGIES.includes(k) && at === "layout_config") {
+            if (v && typeof v === "object" && !Array.isArray(v)) sizes(v, `layout_config.${k}`, into[k] = {}); else bad(`layout_config.${k}`, "an object");
+          } else if (SIZES.includes(k)) {
+            if (typeof v === "number" && v > 0) into[k] = v; else bad(`${at}.${k}`, "a number (0–1 a fraction, more: pixels)");
+          } else if (k === "prompt_position") {
+            if (v === "top" || v === "bottom") into[k] = v; else bad(`${at}.${k}`, `"top" or "bottom"`);
+          }
+        }
+      };
+      sizes(lc, "layout_config", opts.layout_config);
+    }
+  }
+  return { opts, error: errs[0] ?? null };
+}
+
+// The layout_config for the strategy in use: per-strategy values over flat ones.
+export function layoutOf(opts) {
+  const lc = opts.layout_config ?? {}, flat = {};
+  for (const [k, v] of Object.entries(lc)) if (!STRATEGIES.includes(k)) flat[k] = v;
+  return { ...flat, ...(lc[opts.layout_strategy] ?? {}) };
+}
+
+// A size from layout_config: 0–1 is a fraction of `total`, more is pixels;
+// none gives `auto`. Never more than `total`.
+export function sizeOf(v, total, auto) {
+  const px = v == null ? auto : v <= 1 ? total * v : v;
+  return Math.round(Math.max(0, Math.min(px, total)));
+}
+
+// ---- what the picker lists ----
+// The listing narrowed to `dir` (a folder at or under list.root): its files,
+// relative to it. Re-rooting into a folder of a git repo keeps git's listing.
+export function within(list, dir) {
+  const base = dir.replace(/\/+$/, "") || "/";
+  if (base === list.root) return list;
+  if (!base.startsWith(list.root + "/")) return { ...list, root: base, files: [], total: 0, capped: false };
+  const pre = base.slice(list.root.length + 1) + "/";
+  const files = list.files.filter(f => f.startsWith(pre)).map(f => f.slice(pre.length));
+  return { ...list, root: base, files, total: files.length, capped: list.capped };
+}
+
+// Every folder that holds a listed file, at any depth, shallow first.
+export function foldersOf(files) {
+  const out = new Set();
+  for (const f of files) for (let i = f.indexOf("/"); i > 0; i = f.indexOf("/", i + 1)) out.add(f.slice(0, i));
+  return [...out].sort(byDepth);
+}
+
+// The listing as the options want it shown: hidden and ignored paths dropped,
+// then folders instead of files when `folders`. files stays the full markdown
+// list (for a folder's README); rows is what the picker ranks.
+export function shape(list, opts, folders) {
+  const keep = rel => (opts.hidden || !rel.split("/").some(p => p.startsWith("."))) && !opts.ignore?.some(r => r.test(rel));
+  const files = list.files.filter(keep);
+  if (!folders) return { ...list, files, rows: files, folders: false };
+  // Each folder's README, found once here rather than per row on every keystroke.
+  const readmes = new Map(), rank = { "readme.md": 0, "readme.markdown": 1, "index.md": 2 };
+  for (const f of files) {
+    const cut = f.lastIndexOf("/"), r = rank[f.slice(cut + 1).toLowerCase()];
+    if (r === undefined) continue;
+    const dir = cut < 0 ? "" : f.slice(0, cut), had = readmes.get(dir);
+    if (!had || r < rank[had.slice(had.lastIndexOf("/") + 1).toLowerCase()]) readmes.set(dir, f);
+  }
+  return { ...list, files, rows: foldersOf(files), folders: true, readmes };
+}
+
+// A folder's README.md (else index.md, any case) among the listed files, for its preview.
+export function readmeOf(files, dir) {
+  const pre = dir ? dir + "/" : "";
+  for (const want of ["readme.md", "readme.markdown", "index.md"])
+    for (const f of files) if (f.startsWith(pre) && f.slice(pre.length).toLowerCase() === want) return f;
+  return null;
+}
+
+// Folders cut to their first letter ("docs/guides/x.md" → "d/g/x.md"), Telescope's "shorten".
+export const shorten = dir => dir.split("/").map(p => p ? (p[0] === "." ? p.slice(0, 2) : p[0]) : p).join("/");
 
 // ---- preview source ----
 // The preview lexes only the start of a file. marked's lexer grows faster than

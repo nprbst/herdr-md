@@ -25,7 +25,9 @@ Herdr's own docs are the truth: `~/.config/herdr-app/AGENTS.md`, `gpui-kit.d.ts`
 - Links come from untrusted docs: only http(s)/mailto go to `open`; local files are `open -R`.
 - theGrid's `bfd` hotkey daemon swallows `cmd-h`/`cmd-l` system-wide unless `bfd.yaml` has an `apps: Herdr:` override.
 - `thegrid input click|drag|move` read a negative coordinate (a display above the main one) as a flag: put `--` before the numbers. A Herdr started from the CLI is invisible to theGrid; start an isolated one as an app: `open -n -a Herdr --env HERDR_APP_HOME=…`.
-- A long-running main window can exhaust its shared mod JS runtime: every mod, built-ins too, then shows "did not load: Null\"null\"" until Herdr restarts. Bound anything that grows with file size (marked.lexer is superlinear in QuickJS); verify in an isolated Herdr (HERDR_APP_HOME=~/.cache/hdt), not by reloading.
+- A long-running main window can exhaust its shared mod JS runtime: every mod, built-ins too, then shows "did not load: Null\"null\"" until Herdr restarts. Bound anything that grows with file size (marked.lexer is superlinear in QuickJS); verify in an isolated Herdr (HERDR_APP_HOME=~/.cache/hdt-md; `~/.cache/hdt` is herdr-draw's), not by reloading.
+- `herdr-app shot` can hand back a stale frame from a window that isn't redrawing: if two shots match after a change, capture the window itself (`screencapture -x -o -l<theGrid window id>`).
+- An `Input`'s `submit` and the view's `on_key_down` both see Enter: act in one, or a single press acts twice.
 
 ## Commits
 

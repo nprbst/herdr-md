@@ -106,6 +106,47 @@ is already showing, so with none open it does nothing. With no shell to ask,
 the picker lists the focused terminal's folder (or its repo), else the folder
 of the file you opened last, else your home folder.
 
+### Set up the picker
+
+Put options in `~/.config/herdr-md/picker.json`. They use Telescope's names, so
+a Neovim setup carries over, and they're read each time the picker opens.
+Without the file the picker looks as it always has. A full example:
+
+```json
+{
+  "layout_strategy": "center",
+  "layout_config": {
+    "prompt_position": "top",
+    "horizontal": { "width": 0.9, "height": 0.85, "preview_width": 0.6 },
+    "center": { "width": 680, "height": 0.6, "preview_height": 0.5 }
+  },
+  "previewer": false,
+  "files": true,
+  "hidden": true,
+  "no_ignore": false,
+  "file_ignore_patterns": ["^archive/", "\\.draft\\.md$"],
+  "path_display": [],
+  "prompt_prefix": "›",
+  "depth": 4
+}
+```
+
+| Option | Values | Default |
+|---|---|---|
+| `layout_strategy` | `"horizontal"` (list beside the preview) or `"center"` (one small box, the preview above the list) | `"horizontal"` |
+| `layout_config` | `width`, `height`, `preview_width` (horizontal), `preview_height` (center): 0–1 is a fraction of the room, more is pixels. `prompt_position`: `"top"` or `"bottom"`. Put them under `"horizontal"` or `"center"` to set one layout only | as before |
+| `previewer` | `true` or `false` | on for horizontal, off for center |
+| `files` | `false` lists folders (those holding markdown) instead of files, like telescope-file-browser. `Enter` on a folder moves into it and lists its files; `ctrl-f` switches at any time | `true` |
+| `hidden` | `false` leaves out dot files and dot folders | `true` |
+| `no_ignore` | `true` lists git-ignored files too | `false` |
+| `file_ignore_patterns` | regexes tested against each path, relative to the listed folder (JavaScript regex, not Lua patterns) | `[]` |
+| `path_display` | `["tail"]` shows file names only; `["shorten"]` cuts folders to one letter | `[]` |
+| `prompt_prefix` | up to 8 characters | `"›"` |
+| `depth` | how deep a folder without git is searched (1–12) | `4` |
+
+A mistake in the file shows in the picker's footer; the options it could read
+still apply.
+
 ### Click to open from the Files panel
 
 Herdr's Files panel is a shipped mod, so change a copy of it:
@@ -158,7 +199,7 @@ block). For Claude Code there's a ready skill in
 | `{` `}` | previous / next heading |
 | `]` `[` · `c` | next / previous changed block · clear the change marks |
 | `o` | outline (`j`/`k`, `Enter`, `Esc`) |
-| `ctrl-p` | find a markdown file: type to fuzzy-filter, `ctrl-n` `ctrl-p` (or `ctrl-j` `ctrl-k`, arrows) move, `Enter` opens here (`Backspace` comes back), `ctrl-v` opens a split, `ctrl-d` `ctrl-u` scroll the preview, `Esc` closes. Lists the git work tree's `.md`/`.markdown` files (tracked and untracked, not ignored), else the folder 4 levels deep; at most 5000; recently opened first |
+| `ctrl-p` | find a markdown file: type to fuzzy-filter, `ctrl-n` `ctrl-p` (or `ctrl-j` `ctrl-k`, arrows) move, `Enter` opens here (`Backspace` comes back), `ctrl-v` opens a split, `ctrl-d` `ctrl-u` scroll the preview, `ctrl-f` switches files ⇄ folders (`Enter` on a folder moves into it), `ctrl-g` or `Backspace` on an empty prompt goes up a folder, `Esc` closes. Lists the git work tree's `.md`/`.markdown` files (tracked and untracked, not ignored), else the folder 4 levels deep; at most 5000; recently opened first. Layout and listing are set in [`picker.json`](#set-up-the-picker) |
 | `Backspace` | back after following a link (web links open in your browser; local non-markdown files are only shown in Finder, never launched) |
 | `zz` · `za` `zc` `zo` · `zM` `zR` | center · toggle/close/open fold · fold/unfold all |
 | `V` then `j`/`k` | select blocks |

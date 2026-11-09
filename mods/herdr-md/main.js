@@ -13,7 +13,7 @@ import { props, readTextFile, watchFolder, exec, theme, settings, home, appHome,
 import { marked, splitChunks, capSource, refDefs, lexChunk, blocks, LEX_MAX } from "./lex.js";
 import { inlineMath } from "./tex.js";
 import { hash as bhash, diffBlocks, slug, labelOf, inlineRoles, alertOf, ALERTS, nextNumberMode, ordinals, gutterLabel, nextLook, nextMotion, parseCursorPref, cursorParts, LOOK_NAMES } from "./doc.js";
-import { listFiles, parseRecent, pushRecent, rank, runs, previewSource } from "./picker.js";
+import { listFiles, parseRecent, pushRecent, rank, runs, previewSource, parseConfig, layoutOf, sizeOf, within, shape, shorten } from "./picker.js";
 import { VIDEO_FPS, stopped, command, tick } from "./video.js";
 
 // Figures (display math, Mermaid) are rendered by render/render.mjs into
@@ -42,7 +42,7 @@ const HELP = [[
     ["ctrl-v", "open in a split to the right"], ["ctrl-d ctrl-u", "scroll the preview"], ["Esc", "close"],
     ["cmd-shift-o", "anywhere in Herdr: a new viewer, picker open (keys.json)"]]],
 ], [
-  ["READ", [["ctrl-p", "find a markdown file, with preview"], ["o", "outline"], ["Enter", "fold a heading, follow a link, zoom a figure, play a video"], ["O", "open a video in QuickTime"], ["Backspace", "back after a link"],
+  ["READ", [["ctrl-p", "find a markdown file, with preview (ctrl-f: folders, ctrl-g: up a folder)"], ["o", "outline"], ["Enter", "fold a heading, follow a link, zoom a figure, play a video"], ["O", "open a video in QuickTime"], ["Backspace", "back after a link"],
     ["za zc zo", "toggle / close / open fold"], ["zM zR", "fold / unfold all"], ["] [", "next / previous change"], ["c", "clear change marks"],
     ["/", "search"], ["n N", "next / previous match or note"], ["#", "line numbers: absolute, relative, off"],
     ["C", "cursor look: highlight, number badge, lift"], ["B", "cursor motion: blink (default), steady, pulse, grow"]]],
@@ -91,6 +91,8 @@ const noteKey = file => file.replace(/[^a-zA-Z0-9]+/g, "_") + ".json";
 // a file is read for the preview (so holding ctrl-n never waits on disk).
 const RECENT = () => `${NOTES()}/recent.json`;
 const CURSOR_PREF = () => `${NOTES()}/cursor.json`;
+// The picker's options, Telescope-style (see picker.js PICK_DEFAULTS), read each time it opens.
+const PICK_CONF = () => `${home()}/.config/herdr-md/picker.json`;
 // The cursor's motions, run natively by .loop (no timer, no redraws). A pulse
 // breathes slowly; a blink swings far past 0 and 1 so the clamped opacity spends
 // most of each beat fully on or fully off, as a vim cursor does; a grow swells the
@@ -165,8 +167,10 @@ export default class Md extends View {
     this.helpInput.on("blur", (_e, cx) => { this.helpTyping = false; cx.notify(); });
     // The ctrl-p picker. pick: { query, rows, sel, top, pvY } while open.
     this.pick = null; this.pickIn = 0; this.pickList = null; this.recent = []; this.pv = null; this.pvCache = new Map(); this.pvSeq = 0; this.pvLoading = false; this.pickVis = 12;
-    this.pickInput = InputState.new({ value: "", placeholder: "Find a markdown file" });
-    this.pickInput.on("change", (_e, cx) => { if (this.pick && this.pick.query !== this.pickInput.value()) { this.pick.query = this.pickInput.value(); this.rerank(cx, false); } });
+    // Options, the folder it lists (null: the file's tree), folders-only, and a config error for the footer.
+    this.popts = parseConfig(null).opts; this.pickErr = null; this.pickScope = null; this.pickFolders = false; this.pickView = null;
+    this.pickInput = InputState.new({ value: "", placeholder: "Find markdown" });
+    this.pickInput.on("change", (_e, cx) => { if (this.pick && this.pick.query !== this.pickInput.value()) { this.pick.query = this.pickInput.value(); this.pickNote = null; this.rerank(cx, false); } });
     this.pickInput.on("submit", (_e, cx) => this.pickOpen(cx));
     this.pickInput.on("focus", () => { this.pickTyping = true; });
     this.pickInput.on("blur", () => { this.pickTyping = false; });
@@ -1125,19 +1129,58 @@ export default class Md extends View {
     this.outline = false; if (this.help) this.help = false; this.helpIn = 0;
     this.pick = { query: "", rows: [], sel: 0, top: 0, pvY: 0 }; this.pickIn = 0;
     this.pickInput.set_value(""); this.pickInput.focus();
+    // A listing narrowed by the last open's moves is not this tree's: list afresh.
+    if (this.pickScope) this.pickList = null;
+    this.pickScope = null; this.pickFolders = !this.popts.files; this.pickNote = null;
     // A listing of this tree from an earlier open shows at once; a fresh one replaces it.
     const here = this.file ?? this.pickRoot;
     if (this.pickList && !(here && (here === this.pickList.root || here.startsWith(this.pickList.root + "/")))) this.pickList = null;
     this.rerank(cx, false);
     cx.timer.after(16, cx => { this.pickIn = 1; cx.notify(); });
     cx.spawn(async cx => {
+      const conf = parseConfig(await readTextFile(PICK_CONF()).catch(() => null));
+      if (!this.pick) return;
+      const was = JSON.stringify([this.popts.no_ignore, this.popts.depth]);
+      this.popts = conf.opts; this.pickErr = conf.error; this.pickFolders = !conf.opts.files;
+      if (was !== JSON.stringify([conf.opts.no_ignore, conf.opts.depth])) this.pickList = null;
+      this.rerank(cx, true);
       const recent = parseRecent(await readTextFile(RECENT()).catch(() => null));
       // No file behind the picker: its root, else the newest recent file's folder, else home.
       if (!this.file && !this.pickRoot) this.pickRoot = recent[0] ? dirname(recent[0]) : home();
-      const list = await listFiles(exec, this.file ? dirname(this.file) : this.pickRoot);
-      this.pickList = list; this.recent = recent;
-      if (this.pick) this.rerank(cx, true);
+      this.recent = recent;
+      await this.relist(cx);
     });
+  }
+
+  // List the picker's folder: the scope it was moved into, else the open
+  // file's tree (git work tree or folder). Stale answers are dropped.
+  async relist(cx) {
+    const scope = this.pickScope, o = this.popts, seq = this.pickSeq = (this.pickSeq ?? 0) + 1;
+    let list = await listFiles(exec, scope ?? (this.file ? dirname(this.file) : this.pickRoot), { noIgnore: o.no_ignore, depth: o.depth });
+    if (scope) list = within(list, scope);
+    if (seq !== this.pickSeq || !this.pick) return;
+    this.pickList = list;
+    this.rerank(cx, true);
+  }
+
+  // Move the picker into `dir` (Enter on a folder, or up a level), listing
+  // files or folders; the prompt empties.
+  reroot(dir, folders, cx) {
+    const p = this.pick; if (!p) return;
+    this.pickScope = dir; this.pickFolders = folders;
+    if (this.pickList && !(dir === this.pickList.root || dir.startsWith(this.pickList.root + "/"))) this.pickList = null;
+    else if (this.pickList) this.pickList = within(this.pickList, dir);
+    p.query = ""; this.pickInput.set_value("");
+    this.rerank(cx, false);
+    cx.spawn(async cx => { await this.relist(cx); });
+  }
+
+  // Up a folder, but not past home (listing / would search the whole disk).
+  pickUp(cx) {
+    const root = this.pickList?.root ?? this.pickScope; if (!root) return;
+    if (root === home() || dirname(root) === "/") { this.pickNote = `already at the top (${root.replace(home(), "~")})`; cx.notify(); return; }
+    this.pickNote = null;
+    this.reroot(dirname(root), this.pickFolders, cx);
   }
 
   closePicker(cx) {
@@ -1152,7 +1195,10 @@ export default class Md extends View {
   rerank(cx, keep) {
     const p = this.pick; if (!p) return;
     const was = p.rows[p.sel]?.abs;
-    p.rows = this.pickList ? rank(p.query, this.pickList, this.recent, this.file, Infinity) : [];
+    const v = this.pickView = this.pickList ? shape(this.pickList, this.popts, this.pickFolders) : null;
+    p.rows = v ? rank(p.query, { root: v.root, files: v.rows }, this.recent, this.file, Infinity) : [];
+    // A folder row previews its README (or index.md), when it has one.
+    if (v?.folders) for (const r of p.rows) { r.dir = true; const md = v.readmes.get(r.rel); r.pv = md ? `${v.root}/${md}` : null; }
     const at = keep && was ? p.rows.findIndex(r => r.abs === was) : -1;
     this.pickSelect(at >= 0 ? at : 0, cx);
   }
@@ -1165,7 +1211,8 @@ export default class Md extends View {
     const m = Math.min(2, Math.floor((vis - 1) / 2));
     if (p.sel < p.top + m) p.top = Math.max(0, p.sel - m);
     else if (p.sel > p.top + vis - 1 - m) p.top = Math.min(Math.max(0, n - vis), p.sel - vis + 1 + m);
-    this.preview(p.rows[p.sel]?.abs ?? null, cx);
+    const row = p.rows[p.sel];
+    this.preview(row ? (row.dir ? row.pv : row.abs) : null, cx);
     cx.notify();
   }
 
@@ -1216,13 +1263,15 @@ export default class Md extends View {
 
   pickOpen(cx) {
     const row = this.pick?.rows[this.pick.sel]; if (!row) return;
+    // A folder: move into it and list its files (telescope-file-browser).
+    if (row.dir) return this.reroot(row.abs, false, cx);
     this.closePicker(cx);
     if (row.abs !== this.file) this.navigate(row.abs, null, cx, true);
   }
 
   // ctrl-v: a new viewer to the right of this one, this one unchanged.
   pickSplit(cx) {
-    const row = this.pick?.rows[this.pick.sel]; if (!row) return;
+    const row = this.pick?.rows[this.pick.sel]; if (!row || row.dir) return;
     this.closePicker(cx);
     run("pane.split", { direction: "right", mod: MOD, props: { file: row.abs } });
   }
@@ -1239,66 +1288,95 @@ export default class Md extends View {
     const done = () => cx.stop_propagation();
     if (!this.pickIn) return done();   // closing
     if (k === "escape" || (c && k === "c")) { this.closePicker(cx); return done(); }
-    if (k === "enter") { this.pickOpen(cx); return done(); }
+    // While the prompt has the keyboard its submit opens the row; doing it here
+    // too would act twice (Enter on a folder: move in, then open a file there).
+    if (k === "enter") { if (!this.pickTyping) this.pickOpen(cx); return done(); }
     if (k === "down" || (c && (k === "n" || k === "j"))) { this.pickSelect(p.sel + 1, cx); return done(); }
     if (k === "up" || (c && (k === "p" || k === "k"))) { this.pickSelect(p.sel - 1, cx); return done(); }
     if (k === "pagedown" || k === "pageup") { this.pickSelect(p.sel + (k === "pagedown" ? 1 : -1) * Math.max(1, this.pickVis - 1), cx); return done(); }
     if (c && (k === "d" || k === "u")) { this.scrollPreview((k === "d" ? 1 : -1) * Math.max(120, (this.pvViewH ?? 400) / 2), cx); return done(); }
     if (c && k === "v") { this.pickSplit(cx); return done(); }
+    // telescope-file-browser's keys: ctrl-f files ⇄ folders, ctrl-g up a folder,
+    // Backspace on an empty prompt up a folder too.
+    if (c && k === "f") { this.reroot(this.pickList?.root ?? this.pickScope ?? (this.file ? dirname(this.file) : this.pickRoot), !this.pickFolders, cx); return done(); }
+    if (c && k === "g") { this.pickUp(cx); return done(); }
+    if (k === "backspace" && !c && !p.query) { this.pickUp(cx); return done(); }
     // Anything else types into the prompt (it may have lost the keyboard to a click).
     if (!c && !this.pickTyping) this.pickInput.focus();
   }
 
   // A path with its matched characters lit: file name bright, folder dim.
+  // path_display "tail" drops the folder, "shorten" cuts it to first letters.
   pickRow(row, i, t) {
-    const cut = row.rel.lastIndexOf("/") + 1, name = row.rel.slice(cut), dir = row.rel.slice(0, cut);
-    const piece = (r, base, lit, size) => div().text_size(size).text_color(r.hit ? t.accent : base).when(r.hit, el => el.font_semibold()).child(r.text);
+    const cut = row.rel.lastIndexOf("/") + 1, name = row.rel.slice(cut), dir = row.rel.slice(0, cut).replace(/\/$/, "");
+    const pd = this.popts.path_display;
+    const piece = (r, base, size) => div().text_size(size).text_color(r.hit ? t.accent : base).when(r.hit, el => el.font_semibold()).child(r.text);
     const sel = i === this.pick.sel, cur = row.abs === this.file;
+    const where = pd.includes("tail") ? [] : pd.includes("shorten") ? [{ text: shorten(dir), hit: false }] : runs(dir, row.pos, 0);
     return h_flex().id(`pk-${i}`).absolute().left(0).right(0).top(i * PICK_ROW).h(PICK_ROW).px(12).gap(8).items_center().overflow_hidden().cursor_pointer()
       .on_click((_e, cx) => { this.pick.sel = i; this.pickOpen(cx); })
       .child(div().w(8).flex_none().text_size(9).text_color(row.recent ? t.accent : t.border).child(row.recent ? "●" : ""))
-      .child(h_flex().flex_none().children(runs(name, row.pos, cut).map(r => piece(r, sel ? t.foreground : t.muted, true, 13))))
-      .child(h_flex().flex_1().min_w(0).overflow_hidden().children(runs(dir.replace(/\/$/, ""), row.pos, 0).map(r => piece(r, t.dim, false, 11.5))))
+      .child(h_flex().flex_none().children(runs(name, row.pos, cut).map(r => piece(r, sel ? t.foreground : t.muted, 13)))
+        .when(Boolean(row.dir), el => el.child(div().text_size(13).text_color(t.dim).child("/"))))
+      .child(h_flex().flex_1().min_w(0).overflow_hidden().children(where.map(r => piece(r, t.dim, 11.5))))
       .when(cur, el => el.child(div().flex_none().px(5).rounded(3).bg(t.surface).text_size(10.5).text_color(t.dim).child("open")));
   }
 
+  // Telescope's layouts. horizontal: the prompt and list on the left, the
+  // preview on the right (the default). center: one small box, the preview
+  // (off unless previewer is true) above the prompt and list.
   pickPanel(t) {
-    const p = this.pick, list = this.pickList;
-    const W = Math.max(360, Math.min(this.viewW - 40, 1240)), H = Math.max(240, Math.min(this.viewH - 32, 760));
-    const listW = W < 720 ? W : Math.round(Math.min(Math.max(W * 0.4, 320), 460)), pvW = W - listW;
-    const bodyH = H - 46 - 28;   // minus the prompt and the footer
+    const p = this.pick, view = this.pickView, o = this.popts, lc = layoutOf(o);
+    const center = o.layout_strategy === "center";
+    const W = Math.max(center ? 320 : 360, sizeOf(lc.width, this.viewW - 40, Math.min(this.viewW - 40, center ? 680 : 1240)));
+    const showPv = o.previewer ?? !center;
+    const H = Math.max(center ? 200 : 240, sizeOf(lc.height, this.viewH - 32, Math.min(this.viewH - 32, center ? (showPv ? 640 : 440) : 760)));
+    // horizontal: today's split unless preview_width is set; too narrow, no preview.
+    let pvW = 0, pvH = 0;
+    if (showPv && !center && W >= 720) pvW = lc.preview_width != null ? sizeOf(lc.preview_width, W - 240, 0) : W - Math.round(Math.min(Math.max(W * 0.4, 320), 460));
+    if (showPv && center) pvH = sizeOf(lc.preview_height ?? 0.5, H - 46 - 28 - 3 * PICK_ROW, 0);
+    const listW = W - pvW, bodyH = H - 46 - 28 - pvH;   // minus the prompt, the footer and a center preview
     this.pickVis = Math.max(3, Math.floor((bodyH - 8) / PICK_ROW));
     const from = Math.max(0, p.top - 4), to = Math.min(p.rows.length, p.top + this.pickVis + 4);
-    const where = list ? `${list.kind === "git" ? "git" : "folder"} · ${list.root.replace(home(), "~")} · ${list.capped ? `first ${list.files.length} of ${list.total}` : list.files.length} file${list.files.length === 1 ? "" : "s"}` : "listing…";
+    const folders = this.pickFolders, what = folders ? "folder" : "file", n = view ? view.rows.length : 0;
+    // A capped listing: files count the first MAX_FILES; folders come from those files.
+    const count = !view ? "" : view.folders ? `${n} folder${n === 1 ? "" : "s"}${view.capped ? ` (in the first ${view.files.length} of ${view.total} files)` : ""}`
+      : view.capped ? `first ${n} of ${view.total} files` : `${n} file${n === 1 ? "" : "s"}`;
+    const where = view ? `${view.kind === "git" ? "git" : "folder"} · ${view.root.replace(home(), "~")} · ${count}` : "listing…";
+    // The key hints; a center box has room only for the main ones.
+    const hint = center ? `↵ ${folders ? "enter" : "open"} · ctrl-f ${folders ? "files" : "folders"} · ctrl-g up · Esc`
+      : `↵ ${folders ? "enter" : "open"} · ctrl-f ${folders ? "files" : "folders"} · ctrl-g up${folders ? "" : " · ctrl-v split"} · ctrl-n/p move${showPv ? " · ctrl-d/u preview" : ""} · Esc close`;
     const glide = { duration: 130, easing: "ease-out" };
+    const bottom = lc.prompt_position === "bottom";
+    const prompt = h_flex().h(46).flex_none().px(14).gap(10).items_center().border_color(t.border).when(bottom, el => el.border_t(1)).when(!bottom, el => el.border_b(1))
+      .child(div().text_size(16).text_color(t.accent).font_semibold().child(o.prompt_prefix))
+      .child(Input.new(this.pickInput).flex_1().h(30).text_size(14).text_color(t.foreground).font_family(BODY()))
+      .child(div().flex_none().text_size(11.5).text_color(p.query && !p.rows.length && view ? t.blocked : t.dim)
+        .child(view ? `${p.rows.length ? p.sel + 1 : 0} / ${p.rows.length}` : ""));
+    const list = div().id("md-pick-list").flex_1().min_h(0).relative().overflow_hidden().mt(4)
+      .when(!p.rows.length, el => el.child(div().px(16).py(10).text_size(13).text_color(t.dim)
+        .child(!view ? "listing…" : p.query ? `no ${what} matches` : folders ? "no folders with markdown here" : "no markdown files here")))
+      .child(div().absolute().left(0).right(0).top(-p.top * PICK_ROW).h((p.rows.length || 1) * PICK_ROW).transition("top", glide)
+        .when(p.rows.length > 0, el => el.child(div().id("md-pick-bar").absolute().left(6).right(6).top(p.sel * PICK_ROW + 2).h(PICK_ROW - 4)
+          .rounded(6).bg(t.selected).transition("top", glide)))
+        .children(p.rows.slice(from, to).map((row, k) => this.pickRow(row, from + k, t))));
+    const column = v_flex().w(listW).flex_none().min_h(0).h_full()
+      .when(pvW > 0, el => el.border_r(1).border_color(t.border))
+      .when(!bottom, el => el.child(prompt)).child(list).when(bottom, el => el.child(prompt));
+    const top = center ? Math.max(16, Math.round((this.viewH - H) / 3)) : 16;
     return div().id("md-pick-wrap").absolute().top(0).left(0).size_full()
       .on_scroll_wheel((e, cx) => { cx.stop_propagation(); this.scrollPreview(-e.delta.y / Z(), cx); })
       .child(div().id("md-pick-dim").absolute().top(0).left(0).size_full().bg(t.background).opacity(this.pickIn ? 0.6 : 0)
         .transition("opacity", { duration: 180, easing: "ease-out" }).on_mouse_down("left", (_e, cx) => this.closePicker(cx)))
-      .child(h_flex().absolute().left(0).w_full().justify_center().top(this.pickIn ? 16 : 30)
+      .child(h_flex().absolute().left(0).w_full().justify_center().top(this.pickIn ? top : top + 14)
         .opacity(this.pickIn).transition("opacity", { duration: 180, easing: "ease-out" }).transition("top", { duration: 220, easing: "ease-out" })
         .child(v_flex().id("md-pick").w(W).h(H).rounded(12).overflow_hidden().bg(t.popover).border_1().border_color(t.input).shadow_lg()
           .font_family(BODY()).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-          .child(h_flex().flex_1().min_h(0)
-            // Left: prompt, then the list.
-            .child(v_flex().w(listW).flex_none().h_full().when(pvW > 0, el => el.border_r(1).border_color(t.border))
-              .child(h_flex().h(46).flex_none().px(14).gap(10).items_center().border_b(1).border_color(t.border)
-                .child(div().text_size(16).text_color(t.accent).font_semibold().child("›"))
-                .child(Input.new(this.pickInput).flex_1().h(30).text_size(14).text_color(t.foreground).font_family(BODY()))
-                .child(div().flex_none().text_size(11.5).text_color(p.query && !p.rows.length && list ? t.blocked : t.dim)
-                  .child(list ? `${p.rows.length ? p.sel + 1 : 0} / ${p.rows.length}` : "")))
-              .child(div().id("md-pick-list").flex_1().min_h(0).relative().overflow_hidden().mt(4)
-                .when(!p.rows.length, el => el.child(div().px(16).py(10).text_size(13).text_color(t.dim)
-                  .child(!list ? "listing markdown files…" : p.query ? "no file matches" : "no markdown files here")))
-                .child(div().absolute().left(0).right(0).top(-p.top * PICK_ROW).h((p.rows.length || 1) * PICK_ROW).transition("top", glide)
-                  .when(p.rows.length > 0, el => el.child(div().id("md-pick-bar").absolute().left(6).right(6).top(p.sel * PICK_ROW + 2).h(PICK_ROW - 4)
-                    .rounded(6).bg(t.selected).transition("top", glide)))
-                  .children(p.rows.slice(from, to).map((row, k) => this.pickRow(row, from + k, t))))))
-            // Right: the preview.
-            .when(pvW > 0, el => el.child(this.previewPane(t, pvW))))
+          .when(center && pvH > 0, el => el.child(h_flex().h(pvH).flex_none().border_b(1).border_color(t.border).child(this.previewPane(t, W))))
+          .child(h_flex().flex_1().min_h(0).child(column).when(pvW > 0, el => el.child(this.previewPane(t, pvW))))
           .child(h_flex().h(28).flex_none().px(14).gap(12).items_center().border_t(1).border_color(t.border).bg(t.chrome).text_size(11.5).text_color(t.dim)
-            .child(div().flex_1().min_w(0).truncate().child(where))
-            .child(div().flex_none().child("↵ open · ctrl-v split · ctrl-n/p move · ctrl-d/u preview · Esc close")))));
+            .child(div().flex_1().min_w(0).truncate().text_color(this.pickErr ? t.blocked : t.dim).child(this.pickErr ?? this.pickNote ?? where))
+            .child(div().flex_none().child(hint)))));
   }
 
   previewPane(t, w) {
@@ -1323,6 +1401,7 @@ export default class Md extends View {
           .on_size_change((size, cx) => { this.pvH = size.height / Z(); })
           .when(Boolean(pv?.error), el => el.child(div().pt(14).text_color(t.blocked).child(pv.error)))
           .when(Boolean(pv) && !pv.error && !pv.blocks.length, el => el.child(div().pt(14).text_color(t.dim).italic().child("empty file")))
+          .when(!pv && Boolean(p?.rows[p.sel]?.dir), el => el.child(div().pt(14).text_color(t.dim).italic().child("no README here · Enter lists its files")))
           .children(body)
           .when(Boolean(pv?.more || pv?.cut), el => el.child(div().pt(12).text_size(12).text_color(t.dim).italic()
             .child(pv.cut ? "… more below, Enter opens the file" : `… ${pv.more} more block${pv.more === 1 ? "" : "s"}, Enter opens the file`)))));
