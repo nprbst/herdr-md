@@ -7,7 +7,7 @@ Finally, markdown and the terminal done right: a native markdown pane for the
 > herdr-md is a mod for the **Herdr desktop app** (the native macOS window). It
 > doesn't run in `herdr`, the terminal app and CLI.
 
-VIDEO_URL
+https://github.com/user-attachments/assets/0da11259-cf8d-490e-943c-72fb9807540d
 
 [Watch the full 60-second video](https://ryan.upubli.sh/herdr-md/)
 
