@@ -56,7 +56,7 @@ flowchart LR
   D --> E
 ```
 
-## Pointing back
+## Pinning for your agent
 
 Select a few blocks with `V` and `j`, press `p` to pin them, then ask your agent
 "what about this?" It runs `mdh sel` and sees exactly what you meant:

@@ -9,8 +9,6 @@ Finally, markdown and the terminal done right: a native markdown pane for the
 
 https://github.com/user-attachments/assets/0da11259-cf8d-490e-943c-72fb9807540d
 
-[Watch the full 60-second video](https://ryan.upubli.sh/herdr-md/)
-
 - **Reads like a real document.** Heading sizes and colors from your Herdr
   theme, your terminal font, tables, task lists, `> [!NOTE]` callouts, and code
   blocks with syntax colors and a copy button.
@@ -25,9 +23,10 @@ https://github.com/user-attachments/assets/0da11259-cf8d-490e-943c-72fb9807540d
 - **Shows what changed.** Save the file and the pane glides to the first
   edited block and marks each one in the gutter, even across sessions ("3
   changed since you last looked"). `]` / `[` step through them.
-- **Bonus: works with AI.** Your agent runs `mdh hl FILE --lines 40-52 --note
-  "…"` to highlight and annotate; you pin blocks with `V` then `p`, and `mdh
-  sel` hands it the lines you meant.
+- **Bonus: works with AI.** herdr-md has APIs for AI to interact with and
+  annotate the document: your agent runs `mdh hl FILE --lines 40-52 --note "…"`
+  to highlight and annotate, and `mdh sel` reads the blocks you pinned with `V`
+  then `p`.
 
 ## Install
 

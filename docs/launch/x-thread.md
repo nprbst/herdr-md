@@ -5,7 +5,7 @@ line is not posted.
 
 ## 1/4
 
-[Attach: `~/Movies/herdr-md-launch/herdr-md-short.mp4` as a native upload so it autoplays. Also hosted at https://ryan.upubli.sh/herdr-md/herdr-md-short.mp4]
+[Attach: `~/Movies/herdr-md-launch/herdr-md-short.mp4` as a native upload so it autoplays.]
 
 Finally, markdown and the terminal done right.
 
@@ -25,13 +25,13 @@ Edit the file and every changed block gets a gutter mark. ] and [ step through t
 
 ## 3/4
 
-Bonus: works with AI.
+Bonus: it has APIs for AI to interact with and annotate the document.
 
-Your agent runs mdh hl plan.md --lines 40-52 --note "…" and the pane glides there, tints the lines and shows the note.
+Your agent runs mdh hl plan.md --note "…" and the pane glides there and shows the note.
 
-You select with V and pin with p. mdh sel gives the agent the file, lines and text.
+Pin blocks with V and p, and mdh sel hands the agent the exact lines.
 
-*227 / 280 weighted characters*
+*229 / 280 weighted characters*
 
 ## 4/4
 

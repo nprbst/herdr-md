@@ -4,9 +4,7 @@ Run `mdh open README.md` and the file opens in a pane beside your shell in the
 [Herdr](https://herdr.dev) desktop app, drawn natively: real heading sizes in
 your theme's colors, body text in your terminal font. It works.
 
-[![herdr-md: the 60-second launch video](poster.png)](https://ryan.upubli.sh/herdr-md/)
-
-Watch it: https://ryan.upubli.sh/herdr-md/
+Video and code: https://github.com/ryanthedev/herdr-md
 
 ## What you see
 
@@ -32,7 +30,7 @@ reads "3 changed since you last looked."
 
 ## Bonus: works with AI
 
-`mdh` is a small CLI your coding agent can run from its shell:
+herdr-md has APIs for AI to interact with and annotate the document. `mdh` is a small CLI your coding agent can run from its shell:
 
 ```sh
 mdh hl plan.md --lines 40-52 --note "this step skips the cache"
