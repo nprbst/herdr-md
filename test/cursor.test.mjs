@@ -29,4 +29,7 @@ test("the motion animates only the part it names, and only if it's drawn", () =>
   assert.equal(cursorParts("badge", "pulse highlight", true).rowAnim, null);       // no layer to pulse
   assert.equal(cursorParts("lift", "blink both", false).numAnim, null);            // no number shown
   assert.equal(cursorParts("lift", "blink both", false).rowAnim, "blink");
+  assert.deepEqual(cursorParts("badge", "grow highlight", true), { row: null, badge: true, numAnim: null, rowAnim: null });
+  assert.equal(cursorParts("highlight", "grow + pulse highlight", true).rowAnim, "grow+pulse");
+  assert.equal(cursorParts("highlight", "grow + pulse highlight", true).numAnim, null);
 });

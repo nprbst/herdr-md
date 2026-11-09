@@ -45,7 +45,7 @@ const HELP = [[
   ["READ", [["ctrl-p", "find a markdown file, with preview"], ["o", "outline"], ["Enter", "fold a heading, follow a link, zoom a figure, play a video"], ["O", "open a video in QuickTime"], ["Backspace", "back after a link"],
     ["za zc zo", "toggle / close / open fold"], ["zM zR", "fold / unfold all"], ["] [", "next / previous change"], ["c", "clear change marks"],
     ["/", "search"], ["n N", "next / previous match or note"], ["#", "line numbers: absolute, relative, off"],
-    ["C", "cursor look: bar, highlight, number badge, lift"], ["B", "cursor motion: steady, pulse, blink"]]],
+    ["C", "cursor look: bar, highlight, number badge, lift"], ["B", "cursor motion: steady, pulse, grow, blink"]]],
   ["ZOOM (Enter on a diagram or image)", [["h j k l", "pan (or drag, or scroll)"], ["+ -", "zoom in / out (or ctrl-scroll)"], ["0", "fit"], ["Esc", "close"]]],
   ["VIEWER", [["? h", "this help"], ["q", "close the viewer"]]],
 ]];
@@ -93,11 +93,23 @@ const RECENT = () => `${NOTES()}/recent.json`;
 const CURSOR_PREF = () => `${NOTES()}/cursor.json`;
 // The cursor's motions, run natively by .loop (no timer, no redraws). A pulse
 // breathes slowly; a blink swings far past 0 and 1 so the clamped opacity spends
-// most of each beat fully on or fully off, as a vim cursor does. Both start lit.
+// most of each beat fully on or fully off, as a vim cursor does; a grow swells the
+// highlight GROW px on every side and back, which needs the block's size.
 const PULSE = { from: 1, to: 0.35, period: 1800, easing: "ease-in-out" };
-const BLINK = { from: 5, to: -4, period: 1060, easing: "linear" };
-const REST = 700;
-const animate = (el, a) => a ? el.loop("opacity", a === "pulse" ? PULSE : BLINK) : el;
+const BLINK = { from: 5, to: -4, period: 2120, easing: "linear" };
+const GROW = 3, REST = 700;
+function animate(el, a, size) {
+  if (!a) return el;
+  if (a === "blink") return el.loop("opacity", BLINK);
+  if (a.includes("pulse")) el = el.loop("opacity", PULSE);
+  if (a.startsWith("grow") && size) {
+    // .loop takes zoomed pixels, unlike .w()/.top(): size is kept zoomed for it.
+    const swing = (from, to) => ({ from, to, period: PULSE.period, easing: "ease-in-out" }), g = GROW * Z();
+    el = el.loop("left", swing(0, -g)).loop("top", swing(0, -g))
+      .loop("width", swing(size.w, size.w + g * 2)).loop("height", swing(size.h, size.h + g * 2));
+  }
+  return el;
+}
 const PICK_ROW = 28, PV_BLOCKS = 60, PV_WAIT = 70;
 const LANG = { sh: "bash", shell: "bash", zsh: "bash", console: "bash", ts: "typescript", js: "javascript", py: "python", rs: "rust", yml: "yaml", toml: "yaml", jsonc: "json" };
 
@@ -869,6 +881,7 @@ export default class Md extends View {
     const [a, b] = this.range(), sel = this.anchor !== null && i >= a && i <= b, cur = i === this.cursor;
     const picked = this.picked && i >= this.picked[0] && i <= this.picked[1];
     const cp = cur ? cursorParts(this.look, this.resting ? this.cmotion : "steady", this.numbers !== "off") : null;
+    const size = this.curSize?.i === i ? this.curSize : null, grows = Boolean(cp?.rowAnim?.startsWith("grow") && size);
     // Line number lined up with the block's first line of text.
     const fs = tok.type === "heading" ? SIZE[`h${tok.depth}`] : SIZE.body;
     const pad = tok.type === "heading" ? (tok.depth <= 2 ? 22 : 14) : { paragraph: 5, listitem: 2, code: 8, table: 8, blockquote: 8 }[tok.type] ?? 4;
@@ -885,16 +898,20 @@ export default class Md extends View {
         .child(div().id(`num-${i}`).when(cur && cp.badge, el => el.px(6).mr(-6).rounded(4).bg(t.accent + "26")).when(cur, el => animate(el, cp.numAnim))
           .child(gutterLabel(this.numbers, i, this.cursor, tok.from, this.ord)))))
       .on_size_change((size, cx) => { if (this.heights[i] !== size.height / Z()) { this.heights[i] = size.height / Z(); this.reaim(); cx.notify(); } })
-      .child(div().relative().px(14).mx(-14).rounded(6)
+      .child(div().id(`blk-${i}`).relative().px(14).mx(-14).rounded(6)
+        .when(cur, el => el.on_size_change((size, cx) => {
+          const w = size.width, h = size.height, c = this.curSize;   // zoomed px, as .loop wants
+          if (c?.i !== i || c.w !== w || c.h !== h) { this.curSize = { i, w, h }; cx.notify(); }
+        }))
         .when(Boolean(m), el => el.bg(color + "1f").border_l(3).border_color(color))
         .when(Boolean(picked) && !m, el => el.bg(t.ansi4 + "1c").border_l(3).border_color(t.ansi4))
         .when(sel, el => el.bg(t.selection))
         .when(!m && hit, el => el.bg(t.accent + (current ? "2e" : "12")).when(current, el => el.border_l(3).border_color(t.accent)))
         // The cursor: a layer behind the block, so it can pulse or blink without
         // fading the text, and its bar never pushes the text sideways.
-        .when(cur && !sel && Boolean(cp.row), el => el.child(animate(div().id(`cur-${i}`).absolute().top(0).bottom(0).left(0).right(0).rounded(6)
+        .when(cur && !sel && Boolean(cp.row), el => el.child(animate(div().id(`cur-${i}`).absolute().top(0).left(0).when(!grows, el => el.bottom(0).right(0)).rounded(6)
           .when(cp.row === "lift", el => el.bg(t.raised).shadow_md()).when(cp.row !== "lift", el => el.bg(t.hover))
-          .when(cp.row === "bar", el => el.child(div().absolute().left(0).top(0).bottom(0).w(3).rounded_l(6).bg(t.accent))), cp.rowAnim)))
+          .when(cp.row === "bar", el => el.child(div().absolute().left(0).top(0).bottom(0).w(3).rounded_l(6).bg(t.accent))), cp.rowAnim, size)))
         .child(this.block(tok, i, t)))
       .when(Boolean(m?.note) && m?.last, el => el.child(
         h_flex().mt(6).mb(10).gap(10).items_start().px(14).py(10).rounded(8).bg(t.surface).border_1().border_color(color)

@@ -170,7 +170,7 @@ block). For Claude Code there's a ready skill in
 | `/` then `Enter` / `Shift-Enter`, `n` `N` | search; next / previous match (or highlight) |
 | `#` | line numbers: absolute → relative (vim hybrid: the cursor shows its line, the rest how many `j`/`k` away) → off |
 | `C` | cursor look: bar + highlight → highlight → number badge → lift → badge + highlight (saved for every viewer) |
-| `B` | cursor motion: steady, or pulse / blink the number, the highlight or both (it stays solid while moving) |
+| `B` | cursor motion: steady, pulse (number, highlight or both), grow the highlight (alone or with a pulse), blink (number, highlight or both); it stays still while moving |
 | `Esc` | leave visual mode, close search, clear the sent selection |
 | `?` or `h` | key help: `/` searches it (`Enter` back to scrolling, `Esc` clears); `j` `k`, `ctrl-d` `ctrl-u`, `g` `G` or the wheel scroll it; any other key closes it |
 | `q` | close the viewer |

@@ -89,7 +89,14 @@ export function gutterLabel(mode, i, cursor, line, ord) {
 // The cursor's look (`C` cycles) and motion (`B` cycles), saved in
 // ~/.cache/herdr-md/cursor.json so every viewer uses the last choice.
 export const CURSOR_LOOKS = ["bar", "highlight", "badge", "lift", "badge+highlight"];
-export const CURSOR_MOTIONS = ["steady", "pulse number", "pulse highlight", "pulse both", "blink number", "blink highlight", "blink both"];
+// Each motion: what the number and the highlight do (null: stay still).
+const MOTIONS = {
+  "steady": {},
+  "pulse number": { num: "pulse" }, "pulse highlight": { row: "pulse" }, "pulse both": { num: "pulse", row: "pulse" },
+  "grow highlight": { row: "grow" }, "grow + pulse highlight": { row: "grow+pulse" },
+  "blink number": { num: "blink" }, "blink highlight": { row: "blink" }, "blink both": { num: "blink", row: "blink" },
+};
+export const CURSOR_MOTIONS = Object.keys(MOTIONS);
 export const LOOK_NAMES = { bar: "bar + highlight", highlight: "highlight", badge: "number badge", lift: "lift", "badge+highlight": "number badge + highlight" };
 const after = (list, x) => list[(list.indexOf(x) + 1) % list.length];
 export const nextLook = look => after(CURSOR_LOOKS, look);
@@ -106,16 +113,11 @@ export function parseCursorPref(text) {
 // What to draw for the cursor block. row: "bar" | "tint" | "lift" | null (the
 // layer behind the block); badge: a pill behind the line number. With numbers
 // off a badge can't show, so the block lifts instead and the cursor never vanishes.
-// numAnim / rowAnim: null | "pulse" | "blink", for the part the motion names.
+// numAnim: null | "pulse" | "blink"; rowAnim: also "grow" | "grow+pulse".
 export function cursorParts(look, motion, numbersOn) {
   let row = { bar: "bar", highlight: "tint", lift: "lift", "badge+highlight": "tint" }[look] ?? null;
   let badge = numbersOn && (look === "badge" || look === "badge+highlight");
   if (!numbersOn && look === "badge") row = "lift";
-  const [kind, on] = motion.split(" ");
-  const anim = kind === "steady" ? null : kind;
-  return {
-    row, badge,
-    numAnim: numbersOn && (on === "number" || on === "both") ? anim : null,
-    rowAnim: row && (on === "highlight" || on === "both") ? anim : null,
-  };
+  const m = MOTIONS[motion] ?? {};
+  return { row, badge, numAnim: numbersOn ? m.num ?? null : null, rowAnim: row ? m.row ?? null : null };
 }
