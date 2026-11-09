@@ -1328,8 +1328,9 @@ export default class Md extends View {
   pickPanel(t) {
     const p = this.pick, view = this.pickView, o = this.popts, lc = layoutOf(o);
     const center = o.layout_strategy === "center";
-    const W = Math.max(center ? 320 : 360, sizeOf(lc.width, this.viewW - 40, Math.min(this.viewW - 40, center ? 680 : 1240)));
+    // Without a preview the list alone needn't span the pane: it gets a list's width.
     const showPv = o.previewer ?? !center;
+    const W = Math.max(center ? 320 : 360, sizeOf(lc.width, this.viewW - 40, Math.min(this.viewW - 40, center || !showPv ? 680 : 1240)));
     const H = Math.max(center ? 200 : 240, sizeOf(lc.height, this.viewH - 32, Math.min(this.viewH - 32, center ? (showPv ? 640 : 440) : 760)));
     // horizontal: today's split unless preview_width is set; too narrow, no preview.
     let pvW = 0, pvH = 0;
@@ -1343,8 +1344,8 @@ export default class Md extends View {
     const count = !view ? "" : view.folders ? `${n} folder${n === 1 ? "" : "s"}${view.capped ? ` (in the first ${view.files.length} of ${view.total} files)` : ""}`
       : view.capped ? `first ${n} of ${view.total} files` : `${n} file${n === 1 ? "" : "s"}`;
     const where = view ? `${view.kind === "git" ? "git" : "folder"} · ${view.root.replace(home(), "~")} · ${count}` : "listing…";
-    // The key hints; a center box has room only for the main ones.
-    const hint = center ? `↵ ${folders ? "enter" : "open"} · ctrl-f ${folders ? "files" : "folders"} · ctrl-g up · Esc`
+    // The key hints; a box without a preview has room only for the main ones.
+    const hint = center || !showPv ? `↵ ${folders ? "enter" : "open"} · ctrl-f ${folders ? "files" : "folders"} · ctrl-g up · Esc`
       : `↵ ${folders ? "enter" : "open"} · ctrl-f ${folders ? "files" : "folders"} · ctrl-g up${folders ? "" : " · ctrl-v split"} · ctrl-n/p move${showPv ? " · ctrl-d/u preview" : ""} · Esc close`;
     const glide = { duration: 130, easing: "ease-out" };
     const bottom = lc.prompt_position === "bottom";
