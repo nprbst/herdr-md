@@ -4,6 +4,7 @@
 #
 #   scripts/take-setup.sh            fresh copy of demo/, open the viewer
 #   scripts/take-setup.sh --no-open  reset files and state only
+#   scripts/take-setup.sh --restore  after the last take: put back the person's pinned selection
 #
 # Focus the pane the viewer should split from (the left, "agent" pane) first:
 # `mdh open` splits to the right of the focused pane.
@@ -17,6 +18,11 @@ TAKE=${TAKE:-/tmp/herdr-md-take}
 F="$TAKE/demo/tour.md"
 NOTES="$HOME/.cache/herdr-md"
 key=$(printf %s "$F" | sed 's/[^a-zA-Z0-9][^a-zA-Z0-9]*/_/g').json   # main.js noteKey()
+
+if [ "${1:-}" = "--restore" ]; then
+  [ -f "$TAKE/selection.keep" ] && mv "$TAKE/selection.keep" "$NOTES/selection.json" && echo "restored the pinned selection"
+  exit 0
+fi
 
 # 1. Close the viewer the last take opened (it would keep the old state).
 if [ -f "$TAKE/viewer.pane" ]; then
@@ -32,9 +38,17 @@ mkdir -p "$TAKE"
 cp -R "$here/demo" "$TAKE/demo"
 cp "$here/demo/tour.md" "$TAKE/before.md"
 cp "$here/scripts/take/tour-after.md" "$TAKE/after.md"
+# A few real docs, so the ctrl-p picker has a list to filter.
+cp "$here/README.md" "$TAKE/demo/README.md"
+cp "$here/RECIPE.md" "$TAKE/demo/recipe.md"
+cp "$here/docs/LAUNCH-PLAN.md" "$TAKE/demo/launch-plan.md"
+cp "$here/docs/launch/post.md" "$TAKE/demo/launch-post.md"
 
 # 3. Forget highlights, the "seen" hashes (or the open says "N changed since
 #    you last looked") and any pinned selection (so `mdh sel` starts empty).
+#    The pinned selection is shared with every Herdr window: keep the person's
+#    own pin aside once ($TAKE/selection.keep), and put it back with --restore.
+[ -f "$NOTES/selection.json" ] && [ ! -f "$TAKE/selection.keep" ] && cp "$NOTES/selection.json" "$TAKE/selection.keep"
 rm -f "$NOTES/$key" "$NOTES/seen-$key" "$NOTES/selection.json"
 : > "$TAKE/beats.tsv"
 
