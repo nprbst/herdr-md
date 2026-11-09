@@ -15,7 +15,7 @@ on the person's PATH, since opening files and every agent feature go through it:
 
 - A pane (opened with `pane.split {mod: "herdr-md", props: {file}}`) filling with the document on the theme's `background`, content column at most 960px wide, centered, 64px side padding, 28px top.
 - Body text in `settings().font_family` (the person's terminal font; Geist if unset) at 15px, line height 1.65. Headings bold: H1 34px `ansi4`, H2 26px `ansi5`, H3 21px `ansi6`, H4 18px `ansi2`, H5 16px `ansi3`, H6 15px `muted`; H1/H2 get a 1px `border` rule.
-- A gutter left of each block with its first source line number, 12px `dim`; the cursor block's number in `accent`, semibold.
+- A gutter left of each block with its first source line number, 12px `dim`; the cursor block's number in `accent`, semibold, blinking by default (about 1s on, 1s off).
 - Code blocks: rounded 8px `surface` card with a 28px header (language left, `copy` right) over a read-only `Editor` with syntax colors from `ansi1..6`, at most 40 lines tall.
 - Tables: rounded bordered card, header row on `surface` in `ansi4`, alternate rows on `canvas`; column widths weighted by content length.
 - Lists: bullets `•` / numbers in `accent`; tasks `✓` (`ansi2`, text dimmed) / `○`.
@@ -23,7 +23,7 @@ on the person's PATH, since opening files and every agent feature go through it:
 - Local images at natural size, fitted to the column, at most 560px tall, with the alt text as a caption. Remote images: a placeholder (never fetched).
 - `$$…$$` display math: a MathJax SVG in `foreground`, centered. Inline `$…$`: Unicode in italics. ` ```mermaid `: a PNG on a `surface` card in theme colors.
 - Agent highlights: the covered blocks get a 3px left bar and a 12%-alpha tint in the highlight color, and a note card under the last block (bordered in that color, `✦ Claude` label, markdown body; numbered when there are several).
-- The cursor block: `hover` background with a 3px `accent` bar. Visual selection: `selection` background. A sent selection: `ansi4` tint and bar.
+- The cursor block: a layer drawn behind the block (so it never shifts the text): `hover` background with a 3px `accent` bar by default. `C` cycles the look (bar + highlight, highlight, a tinted `accent` pill behind the number, lift: `raised` background with `shadow_md`, pill + highlight); `B` cycles the motion (blink the number by default; steady; pulse the number, highlight or both; grow the highlight 3px a side, alone or with a pulse; blink the highlight or both). The choice is saved in `~/.cache/herdr-md/cursor.json`. With numbers off, the pill look falls back to lift. Visual selection: `selection` background. A sent selection: `ansi4` tint and bar.
 - A 6px scrollbar thumb on the right; a bottom-left status (`VISUAL` badge, pending keys, brief messages like "copied").
 - Search: a 340×38 floating box top right (`⌕`, input, `3/12` counter, `✕`).
 
@@ -32,7 +32,7 @@ on the person's PATH, since opening files and every agent feature go through it:
 - Reloads when the file changes (`watchFolder` on its folder); highlights reapply.
 - Highlights come from `~/.cache/herdr-md/<path-key>.json` (`{seq, focus, highlights: [{lines:[a,b]} | {text}, note?, color?]}`), written by the bundled `mdh` script and watched by the pane. A new `seq` glides to the focused highlight, unfolding sections that hide it.
 - Scrolling is the mod's own viewport: content is absolutely positioned at `top(-offset)` with `.transition("top", …)`: 320ms ease-in-out for jumps (highlights, search, headings, gg/G), 120ms for cursor steps, 60ms for wheel ticks, 200ms for half pages.
-- Keys (with `"focusable": true`): `j/k` (counts), `gg/G`, `ctrl-d/u/f/b`, `space`, `{ }`/`[ ]`, `zz`, `za/zc/zo/zM/zR`, `V`, `y` (copy source via `pbcopy`), `p` (pin: write `~/.cache/herdr-md/selection.json`), `Enter` (fold a heading or follow its first link), `/` search with `Enter`/`Shift-Enter`, `n/N`, `#`, `Esc`. A click puts the cursor on that block; clicking a heading folds it.
+- Keys (with `"focusable": true`): `j/k` (counts), `gg/G`, `ctrl-d/u/f/b`, `space`, `{ }`/`[ ]`, `zz`, `za/zc/zo/zM/zR`, `V`, `y` (copy source via `pbcopy`), `p` (pin: write `~/.cache/herdr-md/selection.json`), `Enter` (fold a heading or follow its first link), `/` search with `Enter`/`Shift-Enter`, `n/N`, `#`, `C`, `B`, `Esc`. A click puts the cursor on that block; clicking a heading folds it.
 - Figures render in one batch per load through `node render/render.mjs '<jobs JSON>'`; the first time, the mod runs `npm install` there. Outputs are cached by a hash of source and colors, so a theme change re-renders once.
 
 ## Built from
@@ -52,6 +52,8 @@ on the person's PATH, since opening files and every agent feature go through it:
 - A mod can't write files outside the Herdr home when installed through a symlink, and Herdr won't hot-reload a symlinked mod folder: install a copy.
 - `"focus"` from `nextCommand()` also arrives when a popup over the pane closes (the leader panel closes before it runs `pane.go`): take the keyboard only if `panes()` still shows this mod focused ~60ms later, or the keyboard stays behind.
 - Don't name a method `render` for anything but the view, and don't store search text in a token's `text` field (it corrupts the TeX and code copy).
+- Animate the cursor with `.loop`, never a timer. The loop clock is shared by every view, so a freshly drawn cursor joins mid-cycle and can land unlit: keep it still while it moves and start the motion after ~700ms at rest. Opacity is clamped, so `from: 5, to: -4`, linear, makes a hard blink.
+- `.loop("width" | "height" | "left" | "top")` takes zoomed pixels (as `on_size_change` reports them), unlike `w()`/`top()`.
 - Mermaid labels need a real browser; the first diagram costs ~3s for Chrome to start.
 
 ## Done when
