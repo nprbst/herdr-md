@@ -38,8 +38,8 @@ def style(ax):
     ax.tick_params(colors=MUTED, labelsize=13)
     ax.set_facecolor("none")
 
-def chart():
-    fig, ax = plt.subplots(figsize=(6, 3.4), dpi=260)
+def chart(name="fit.png", size=(6, 3.4)):
+    fig, ax = plt.subplots(figsize=size, dpi=260)
     fig.patch.set_alpha(0)
     style(ax)
     w, b, _ = path[-1]
@@ -49,7 +49,7 @@ def chart():
     ax.set_xlabel("x", color=INK, fontsize=14); ax.set_ylabel("y", color=INK, fontsize=14)
     ax.set_title(f"best fit: ŷ = {w:.2f}x + {b:.2f}", color=INK, fontsize=17, loc="left")
     fig.tight_layout()
-    fig.savefig(os.path.join(DEMO, "fit.png"), transparent=True)
+    fig.savefig(os.path.join(DEMO, name), transparent=True)
     plt.close(fig)
 
 def loss_gif():
@@ -97,5 +97,6 @@ def fit_clip():
                     "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "22", "-movflags", "+faststart",
                     os.path.join(DEMO, "fit.mp4")], check=True)
 
-chart(); loss_gif(); fit_clip()
-print("wrote demo/fit.png, demo/loss.gif, demo/fit.mp4")
+# hero-fit.png: the same chart, wide and short, for the hero.md screenshot (preview.png).
+chart(); chart("hero-fit.png", (8, 2.6)); loss_gif(); fit_clip()
+print("wrote demo/fit.png, demo/hero-fit.png, demo/loss.gif, demo/fit.mp4")
