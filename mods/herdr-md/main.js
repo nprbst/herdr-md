@@ -12,7 +12,7 @@ import { v_flex, h_flex, Editor, EditorState, TextView, InputState, Input } from
 import { props, readTextFile, watchFolder, exec, theme, settings, home, appHome, nextCommand, panes, focused, run } from "herdr";
 import { marked, splitChunks, capSource, refDefs, lexChunk, blocks, LEX_MAX } from "./lex.js";
 import { inlineMath } from "./tex.js";
-import { hash as bhash, diffBlocks, slug, labelOf, inlineRoles, alertOf, ALERTS, nextNumberMode, ordinals, gutterLabel } from "./doc.js";
+import { hash as bhash, diffBlocks, slug, labelOf, inlineRoles, alertOf, ALERTS, nextNumberMode, ordinals, gutterLabel, nextLook, nextMotion, parseCursorPref, cursorParts, LOOK_NAMES } from "./doc.js";
 import { listFiles, parseRecent, pushRecent, rank, runs, previewSource } from "./picker.js";
 import { VIDEO_FPS, stopped, command, tick } from "./video.js";
 
@@ -44,7 +44,8 @@ const HELP = [[
 ], [
   ["READ", [["ctrl-p", "find a markdown file, with preview"], ["o", "outline"], ["Enter", "fold a heading, follow a link, zoom a figure, play a video"], ["O", "open a video in QuickTime"], ["Backspace", "back after a link"],
     ["za zc zo", "toggle / close / open fold"], ["zM zR", "fold / unfold all"], ["] [", "next / previous change"], ["c", "clear change marks"],
-    ["/", "search"], ["n N", "next / previous match or note"], ["#", "line numbers: absolute, relative, off"]]],
+    ["/", "search"], ["n N", "next / previous match or note"], ["#", "line numbers: absolute, relative, off"],
+    ["C", "cursor look: bar, highlight, number badge, lift"], ["B", "cursor motion: steady, pulse, blink"]]],
   ["ZOOM (Enter on a diagram or image)", [["h j k l", "pan (or drag, or scroll)"], ["+ -", "zoom in / out (or ctrl-scroll)"], ["0", "fit"], ["Esc", "close"]]],
   ["VIEWER", [["? h", "this help"], ["q", "close the viewer"]]],
 ]];
@@ -89,6 +90,14 @@ const noteKey = file => file.replace(/[^a-zA-Z0-9]+/g, "_") + ".json";
 // many blocks a preview renders, and how long the selection must rest before
 // a file is read for the preview (so holding ctrl-n never waits on disk).
 const RECENT = () => `${NOTES()}/recent.json`;
+const CURSOR_PREF = () => `${NOTES()}/cursor.json`;
+// The cursor's motions, run natively by .loop (no timer, no redraws). A pulse
+// breathes slowly; a blink swings far past 0 and 1 so the clamped opacity spends
+// most of each beat fully on or fully off, as a vim cursor does. Both start lit.
+const PULSE = { from: 1, to: 0.35, period: 1800, easing: "ease-in-out" };
+const BLINK = { from: 5, to: -4, period: 1060, easing: "linear" };
+const REST = 700;
+const animate = (el, a) => a ? el.loop("opacity", a === "pulse" ? PULSE : BLINK) : el;
 const PICK_ROW = 28, PV_BLOCKS = 60, PV_WAIT = 70;
 const LANG = { sh: "bash", shell: "bash", zsh: "bash", console: "bash", ts: "typescript", js: "javascript", py: "python", rs: "rust", yml: "yaml", toml: "yaml", jsonc: "json" };
 
@@ -119,7 +128,7 @@ export default class Md extends View {
     this.help = false; this.helpIn = 0; this.zoom = null; this.viewW = 0;
     this.query = ""; this.matches = []; this.mi = 0; this.searching = false; this.typing = false;
     // Vim-ish cursor: one rendered block is one "line". anchor !== null means visual mode.
-    this.cursor = 0; this.anchor = null; this.pending = ""; this.count = ""; this.numbers = "absolute"; this.picked = null; this.src = ""; this.lines = 0;
+    this.cursor = 0; this.anchor = null; this.pending = ""; this.count = ""; this.numbers = "absolute"; this.look = "bar"; this.cmotion = "steady"; this.resting = true; this.restAt = 0; this.restGen = 0; this.picked = null; this.src = ""; this.lines = 0;
     this.handle = cx.focus_handle();
     this.input = InputState.new({ value: "", placeholder: "Search" });
     this.input.on("change", (_e, cx) => { this.search(this.input.value()); this.aimAt(this.matches[this.mi = 0]); cx.notify(); });
@@ -148,6 +157,7 @@ export default class Md extends View {
     if (!this.file && !this.pickRoot) { const f = focused(); if (f?.terminal && f.cwd) this.pickRoot = f.cwd; }
     if (!this.file && props()?.pick) cx.timer.after(30, cx => { this.openPicker(cx); cx.notify(); });
     this.remember(this.file);
+    readTextFile(CURSOR_PREF()).catch(() => null).then(text => { const p = parseCursorPref(text); this.look = p.look; this.cmotion = p.motion; cx.notify(); });
     this.load(cx);
     this.watch(cx);
     this.watchNotes(cx);
@@ -858,26 +868,33 @@ export default class Md extends View {
     const color = m ? ({ green: t.ansi2, red: t.ansi1, blue: t.ansi4, purple: t.ansi5, cyan: t.ansi6 }[m.color] ?? t.ansi3) : null;
     const [a, b] = this.range(), sel = this.anchor !== null && i >= a && i <= b, cur = i === this.cursor;
     const picked = this.picked && i >= this.picked[0] && i <= this.picked[1];
+    const cp = cur ? cursorParts(this.look, this.resting ? this.cmotion : "steady", this.numbers !== "off") : null;
     // Line number lined up with the block's first line of text.
     const fs = tok.type === "heading" ? SIZE[`h${tok.depth}`] : SIZE.body;
     const pad = tok.type === "heading" ? (tok.depth <= 2 ? 22 : 14) : { paragraph: 5, listitem: 2, code: 8, table: 8, blockquote: 8 }[tok.type] ?? 4;
     const numTop = pad + (tok.type === "code" ? 2 : (fs * 1.65 - 19) / 2);
     const changed = this.changed.has(i), gone = this.removed.get(i);
     return v_flex().id(`row-${i}`).relative()
-      .on_mouse_down("left", (_e, cx) => { if (this.zoom) return; this.cursor = i; this.handle.focus(); cx.notify(); })
+      .on_mouse_down("left", (_e, cx) => { if (this.zoom) return; this.cursor = i; this.rest(cx); this.handle.focus(); cx.notify(); })
       .when(Boolean(gone), el => el.child(this.removedMark(gone, t)))
       .when(Boolean(picked) && i === this.picked[0], el => el.child(h_flex().mb(2).gap(6).items_center().text_size(11).text_color(t.ansi4)
         .child(div().child("📌 Pinned for Claude")).child(div().text_color(t.dim).child("· Esc unpins"))))
       .when(changed, el => el.child(div().absolute().left(-12).top(gone ? 26 : 4).bottom(4).w(3).rounded(2).bg(t.ansi2)))
-      .when(this.numbers !== "off", el => el.child(div().absolute().left(-PAD - 4).top(numTop).w(PAD - 14).text_right().font_family(BODY()).text_size(12).line_height(1.6)
-        .text_color(cur ? t.accent : t.dim).when(cur, el => el.font_semibold()).child(gutterLabel(this.numbers, i, this.cursor, tok.from, this.ord))))
+      .when(this.numbers !== "off", el => el.child(h_flex().justify_end().absolute().left(-PAD - 4).top(numTop).w(PAD - 14).font_family(BODY()).text_size(12).line_height(1.6)
+        .text_color(cur ? t.accent : t.dim).when(cur, el => el.font_semibold())
+        .child(div().id(`num-${i}`).when(cur && cp.badge, el => el.px(6).mr(-6).rounded(4).bg(t.accent + "26")).when(cur, el => animate(el, cp.numAnim))
+          .child(gutterLabel(this.numbers, i, this.cursor, tok.from, this.ord)))))
       .on_size_change((size, cx) => { if (this.heights[i] !== size.height / Z()) { this.heights[i] = size.height / Z(); this.reaim(); cx.notify(); } })
-      .child(div().px(14).mx(-14).rounded(6)
+      .child(div().relative().px(14).mx(-14).rounded(6)
         .when(Boolean(m), el => el.bg(color + "1f").border_l(3).border_color(color))
         .when(Boolean(picked) && !m, el => el.bg(t.ansi4 + "1c").border_l(3).border_color(t.ansi4))
         .when(sel, el => el.bg(t.selection))
-        .when(cur && !sel, el => el.bg(t.hover).border_l(3).border_color(t.accent))
         .when(!m && hit, el => el.bg(t.accent + (current ? "2e" : "12")).when(current, el => el.border_l(3).border_color(t.accent)))
+        // The cursor: a layer behind the block, so it can pulse or blink without
+        // fading the text, and its bar never pushes the text sideways.
+        .when(cur && !sel && Boolean(cp.row), el => el.child(animate(div().id(`cur-${i}`).absolute().top(0).bottom(0).left(0).right(0).rounded(6)
+          .when(cp.row === "lift", el => el.bg(t.raised).shadow_md()).when(cp.row !== "lift", el => el.bg(t.hover))
+          .when(cp.row === "bar", el => el.child(div().absolute().left(0).top(0).bottom(0).w(3).rounded_l(6).bg(t.accent))), cp.rowAnim)))
         .child(this.block(tok, i, t)))
       .when(Boolean(m?.note) && m?.last, el => el.child(
         h_flex().mt(6).mb(10).gap(10).items_start().px(14).py(10).rounded(8).bg(t.surface).border_1().border_color(color)
@@ -1399,6 +1416,21 @@ export default class Md extends View {
     return { file: this.file, lines: [from, to], text: this.src.split("\n").slice(from - 1, to).join("\n") };
   }
 
+  // The motion's loop runs on a clock shared by every view, so a cursor that just
+  // moved could land mid-blink, unlit. As in an editor, it stays solid while it
+  // moves and starts pulsing or blinking once it has rested REST ms.
+  rest(cx) {
+    if (this.cursor === this.restAt) return;
+    this.restAt = this.cursor; this.resting = false;
+    if (this.cmotion === "steady") return;
+    const gen = ++this.restGen;
+    cx.timer.after(REST, cx => { if (gen === this.restGen) { this.resting = true; cx.notify(); } });
+  }
+
+  saveCursor() {
+    exec("sh", ["-c", 'mkdir -p "$1" && printf %s "$2" > "$1/.cursor.$$" && mv -f "$1/.cursor.$$" "$1/cursor.json"', "cursor", NOTES(), JSON.stringify({ look: this.look, motion: this.cmotion })]);
+  }
+
   yank() { const { text } = this.selection(); exec("sh", ["-c", 'printf %s "$1" | LANG=en_US.UTF-8 pbcopy', "yank", text]); this.flash = "copied"; }
 
   // Pin the selection for Claude: `mdh sel` prints it.
@@ -1489,6 +1521,8 @@ export default class Md extends View {
         else { this.picked = null; exec("rm", ["-f", `${NOTES()}/selection.json`]); }
         return cx.notify();
       case "#": this.numbers = nextNumberMode(this.numbers); this.flash = `line numbers: ${this.numbers}`; return cx.notify();
+      case "C": this.look = nextLook(this.look); this.flash = `cursor: ${LOOK_NAMES[this.look]} · C next look · B motion`; this.saveCursor(); return cx.notify();
+      case "B": this.cmotion = nextMotion(this.cmotion); this.flash = `cursor motion: ${this.cmotion} · B next · C look`; this.resting = true; this.saveCursor(); return cx.notify();
       case "O": return this.openVideo(cx);
       case "/": return this.openSearch(cx);
       case "?": case "h": return this.openHelp(cx);
@@ -1520,7 +1554,7 @@ export default class Md extends View {
     const thumbH = this.contentH > this.viewH ? Math.max(30, this.viewH * this.viewH / this.contentH) : 0;
     const thumbY = thumbH ? (this.viewH - thumbH) * this.offset / (this.contentH - this.viewH) : 0;
     return v_flex().id("md").size_full().min_h(0).bg(t.background).text_color(t.foreground)
-      .track_focus(this.handle).on_key_down((e, cx) => this.keys(e, cx))
+      .track_focus(this.handle).on_key_down((e, cx) => { this.keys(e, cx); this.rest(cx); })
       .child(this.headerBar(t))
       .child(div().id("md-view").flex_1().min_h(0).relative().overflow_hidden()
         .on_size_change((size, cx) => { this.viewH = size.height / Z(); this.viewW = size.width / Z(); if (this.zoom) this.clampZoom(); this.offset = this.clamp(this.offset); this.reaim(); cx.notify(); })
