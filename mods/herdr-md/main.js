@@ -697,7 +697,8 @@ export default class Md extends View {
   figure(tok, id, t) {
     // A theme switch back to a look already rendered shows that image at once,
     // without waiting a frame for renderFigures to repoint tok.fig.
-    const live = this.figs[this.figKey(tok)];
+    if (tok.liveSig !== this.figSig) { tok.liveSig = this.figSig; tok.liveKey = this.figKey(tok); }   // hashed once per theme, not per frame
+    const live = this.figs[tok.liveKey];
     const f = (live?.path ? live : this.figs[tok.fig]) ?? { pending: true }, math = isMath(tok);
     if (f.path) {
       const max = this.colW - (math ? 0 : 34);
