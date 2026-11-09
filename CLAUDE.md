@@ -13,6 +13,7 @@ Herdr's own docs are the truth: `~/.config/herdr-app/AGENTS.md`, `gpui-kit.d.ts`
 
 - Install a **copy**, never a symlink: Herdr won't hot-reload a symlinked mod, and a symlinked mod can't write files (write roots resolve outside `~/.config/herdr-app`).
 - `EditorState.new` throws inside `render`: create it at load.
+- Focusing an `InputState` whose `Input` isn't rendered yet drops the keyboard entirely (the view gets no keys until clicked): keep the `Input` mounted.
 - `TextView.markdown` inherits size/font but ignores parent `text_color`.
 - `image()` only loads files under the Herdr home: images are copied into `.cache/`.
 - Build Herdr-home paths from `appHome()`, never `home()/.config/herdr-app`: under `HERDR_APP_HOME` the hardcoded path copies media to the wrong home and videos show black.
