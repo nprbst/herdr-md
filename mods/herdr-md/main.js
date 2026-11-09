@@ -12,7 +12,7 @@ import { v_flex, h_flex, Editor, EditorState, TextView, InputState, Input } from
 import { props, readTextFile, watchFolder, exec, theme, settings, home, appHome, nextCommand, panes, focused, run } from "herdr";
 import { marked, splitChunks, capSource, refDefs, lexChunk, blocks, LEX_MAX } from "./lex.js";
 import { inlineMath } from "./tex.js";
-import { hash as bhash, diffBlocks, slug, labelOf, inlineRoles, alertOf, ALERTS } from "./doc.js";
+import { hash as bhash, diffBlocks, slug, labelOf, inlineRoles, alertOf, ALERTS, nextNumberMode, ordinals, gutterLabel } from "./doc.js";
 import { listFiles, parseRecent, pushRecent, rank, runs, previewSource } from "./picker.js";
 import { VIDEO_FPS, stopped, command, tick } from "./video.js";
 
@@ -44,7 +44,7 @@ const HELP = [[
 ], [
   ["READ", [["ctrl-p", "find a markdown file, with preview"], ["o", "outline"], ["Enter", "fold a heading, follow a link, zoom a figure, play a video"], ["O", "open a video in QuickTime"], ["Backspace", "back after a link"],
     ["za zc zo", "toggle / close / open fold"], ["zM zR", "fold / unfold all"], ["] [", "next / previous change"], ["c", "clear change marks"],
-    ["/", "search"], ["n N", "next / previous match or note"], ["#", "line numbers"]]],
+    ["/", "search"], ["n N", "next / previous match or note"], ["#", "line numbers: absolute, relative, off"]]],
   ["ZOOM (Enter on a diagram or image)", [["h j k l", "pan (or drag, or scroll)"], ["+ -", "zoom in / out (or ctrl-scroll)"], ["0", "fit"], ["Esc", "close"]]],
   ["VIEWER", [["? h", "this help"], ["q", "close the viewer"]]],
 ]];
@@ -113,13 +113,13 @@ export default class Md extends View {
     this.noteAlpha = 1; this.typed = Infinity;
     this.offset = 0; this.motion = 0; this.heights = []; this.loadGen = 0; this.shown = null; this.viewH = 0; this.contentH = 0; this.colW = MAX_W - PAD * 2;
     this.notes = { highlights: [] }; this.seq = null; this.pendingFocus = null; this.aim = null;
-    this.folded = new Set(); this.hidden = [];
+    this.folded = new Set(); this.hidden = []; this.ord = [];
     this.labels = new Map(); this.anchors = new Map(); this.changed = new Set(); this.removed = new Map(); this.lastHashes = null;
     this.history = []; this.pendingAnchor = null; this.restore = null; this.outline = false; this.oi = 0; this.watchGen = 0;
     this.help = false; this.helpIn = 0; this.zoom = null; this.viewW = 0;
     this.query = ""; this.matches = []; this.mi = 0; this.searching = false; this.typing = false;
     // Vim-ish cursor: one rendered block is one "line". anchor !== null means visual mode.
-    this.cursor = 0; this.anchor = null; this.pending = ""; this.count = ""; this.numbers = true; this.picked = null; this.src = ""; this.lines = 0;
+    this.cursor = 0; this.anchor = null; this.pending = ""; this.count = ""; this.numbers = "absolute"; this.picked = null; this.src = ""; this.lines = 0;
     this.handle = cx.focus_handle();
     this.input = InputState.new({ value: "", placeholder: "Search" });
     this.input.on("change", (_e, cx) => { this.search(this.input.value()); this.aimAt(this.matches[this.mi = 0]); cx.notify(); });
@@ -442,6 +442,7 @@ export default class Md extends View {
       this.hidden[i] = depth !== null;
       if (depth === null && b.type === "heading" && this.folded.has(i)) depth = b.depth;
     });
+    this.ord = ordinals(this.hidden, this.blocks.length);
   }
 
   sectionSize(h) { let n = 0; for (let j = h + 1; j < this.blocks.length && this.covers(h, j); j++) n++; return n; }
@@ -868,8 +869,8 @@ export default class Md extends View {
       .when(Boolean(picked) && i === this.picked[0], el => el.child(h_flex().mb(2).gap(6).items_center().text_size(11).text_color(t.ansi4)
         .child(div().child("📌 Pinned for Claude")).child(div().text_color(t.dim).child("· Esc unpins"))))
       .when(changed, el => el.child(div().absolute().left(-12).top(gone ? 26 : 4).bottom(4).w(3).rounded(2).bg(t.ansi2)))
-      .when(this.numbers, el => el.child(div().absolute().left(-PAD - 4).top(numTop).w(PAD - 14).text_right().font_family(BODY()).text_size(12).line_height(1.6)
-        .text_color(cur ? t.accent : t.dim).when(cur, el => el.font_semibold()).child(String(tok.from))))
+      .when(this.numbers !== "off", el => el.child(div().absolute().left(-PAD - 4).top(numTop).w(PAD - 14).text_right().font_family(BODY()).text_size(12).line_height(1.6)
+        .text_color(cur ? t.accent : t.dim).when(cur, el => el.font_semibold()).child(gutterLabel(this.numbers, i, this.cursor, tok.from, this.ord))))
       .on_size_change((size, cx) => { if (this.heights[i] !== size.height / Z()) { this.heights[i] = size.height / Z(); this.reaim(); cx.notify(); } })
       .child(div().px(14).mx(-14).rounded(6)
         .when(Boolean(m), el => el.bg(color + "1f").border_l(3).border_color(color))
@@ -1487,7 +1488,7 @@ export default class Md extends View {
         else if (this.searching) return this.closeSearch(cx);
         else { this.picked = null; exec("rm", ["-f", `${NOTES()}/selection.json`]); }
         return cx.notify();
-      case "#": this.numbers = !this.numbers; return cx.notify();
+      case "#": this.numbers = nextNumberMode(this.numbers); this.flash = `line numbers: ${this.numbers}`; return cx.notify();
       case "O": return this.openVideo(cx);
       case "/": return this.openSearch(cx);
       case "?": case "h": return this.openHelp(cx);

@@ -64,3 +64,24 @@ export function alertOf(tok) {
   const body = tok.raw.slice(m[0].length).split("\n").map(l => l.replace(/^>\s?/, "")).join("\n").trim();
   return { kind: m[1].toUpperCase(), body };
 }
+
+// Line numbers in the gutter. `#` cycles absolute → relative → off.
+export const NUMBER_MODES = ["absolute", "relative", "off"];
+export const nextNumberMode = mode => NUMBER_MODES[(NUMBER_MODES.indexOf(mode) + 1) % NUMBER_MODES.length];
+
+// Each block's position among the visible (unfolded) blocks: j/k skip hidden
+// blocks, so the j/k distance between two blocks is the difference of their
+// ordinals. Hidden blocks share the ordinal of the next visible one.
+export function ordinals(hidden, n) {
+  const ord = new Array(n); let k = 0;
+  for (let i = 0; i < n; i++) { ord[i] = k; if (!hidden[i]) k++; }
+  return ord;
+}
+
+// The gutter label for block i, as vim's number + relativenumber: the cursor's
+// block shows its source line, every other block its j/k distance from the cursor.
+export function gutterLabel(mode, i, cursor, line, ord) {
+  if (mode === "off") return null;
+  if (mode !== "relative" || i === cursor) return String(line);
+  return String(Math.abs((ord[i] ?? 0) - (ord[cursor] ?? 0)));
+}
