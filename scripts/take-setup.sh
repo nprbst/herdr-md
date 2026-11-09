@@ -20,7 +20,8 @@ NOTES="$HOME/.cache/herdr-md"
 key=$(printf %s "$F" | sed 's/[^a-zA-Z0-9][^a-zA-Z0-9]*/_/g').json   # main.js noteKey()
 
 if [ "${1:-}" = "--restore" ]; then
-  [ -f "$TAKE/selection.keep" ] && mv "$TAKE/selection.keep" "$NOTES/selection.json" && echo "restored the pinned selection"
+  if [ -f "$TAKE/selection.keep" ]; then mv "$TAKE/selection.keep" "$NOTES/selection.json" && echo "restored the pinned selection"
+  elif grep -q "\"file\": *\"$TAKE/" "$NOTES/selection.json" 2>/dev/null; then rm -f "$NOTES/selection.json" && echo "removed the take's pinned selection"; fi
   exit 0
 fi
 
@@ -48,7 +49,8 @@ cp "$here/docs/launch/post.md" "$TAKE/demo/launch-post.md"
 #    you last looked") and any pinned selection (so `mdh sel` starts empty).
 #    The pinned selection is shared with every Herdr window: keep the person's
 #    own pin aside once ($TAKE/selection.keep), and put it back with --restore.
-[ -f "$NOTES/selection.json" ] && [ ! -f "$TAKE/selection.keep" ] && cp "$NOTES/selection.json" "$TAKE/selection.keep"
+[ -f "$NOTES/selection.json" ] && [ ! -f "$TAKE/selection.keep" ] && ! grep -q "\"file\": *\"$TAKE/" "$NOTES/selection.json" \
+  && cp "$NOTES/selection.json" "$TAKE/selection.keep"
 rm -f "$NOTES/$key" "$NOTES/seen-$key" "$NOTES/selection.json"
 : > "$TAKE/beats.tsv"
 
