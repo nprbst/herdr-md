@@ -1280,9 +1280,11 @@ export default class Md extends View {
   }
 
   // ---- key help (? or h) ----
-  // Fades and drifts in; any key fades it out, then it unmounts.
+  // Fades and drifts in; j/k, ctrl-d/ctrl-u, g/G and the wheel scroll it (its
+  // own viewport: top(-helpY), plain divs can't be scrolled from code); any
+  // other key fades it out, then it unmounts.
   openHelp(cx) {
-    this.help = true; this.helpIn = 0; cx.notify();
+    this.help = true; this.helpIn = 0; this.helpY = 0; cx.notify();
     cx.timer.after(16, cx => { this.helpIn = 1; cx.notify(); });
   }
 
@@ -1291,20 +1293,46 @@ export default class Md extends View {
     cx.timer.after(180, cx => { if (!this.helpIn) { this.help = false; cx.notify(); } });
   }
 
+  scrollHelp(dy, cx) {
+    const max = Math.max(0, (this.helpH ?? 0) - (this.helpViewH ?? 0));
+    this.helpY = Math.max(0, Math.min((this.helpY ?? 0) + dy, max)); cx.notify();
+  }
+
+  helpKeys(k, mod, cx) {
+    const half = Math.max(80, (this.helpViewH ?? 300) / 2);
+    if (k === "j" || k === "down") return this.scrollHelp(40, cx);
+    if (k === "k" || k === "up") return this.scrollHelp(-40, cx);
+    if (mod.control && k === "d") return this.scrollHelp(half, cx);
+    if (mod.control && k === "u") return this.scrollHelp(-half, cx);
+    if (k === "g") return this.scrollHelp(-1e9, cx);
+    if (k === "G") return this.scrollHelp(1e9, cx);
+    this.closeHelp(cx);
+  }
+
   helpPanel(t) {
     const key = k => div().px(6).rounded(4).bg(t.surface).border_1().border_color(t.border).text_color(t.foreground).child(k);
     const w = Math.min(720, Math.max(280, this.colW + PAD * 2 - 40));
+    const maxView = Math.max(110, this.viewH - 36 - 48);   // the panel's max height minus its padding and header
+    const viewH = Math.min(this.helpH ?? maxView, maxView), scrolls = (this.helpH ?? 0) > maxView + 0.5;
     return h_flex().id("md-help-wrap").absolute().left(0).w_full().justify_center().top(this.helpIn ? 18 : 30)
       .opacity(this.helpIn).transition("opacity", { duration: 180, easing: "ease-out" }).transition("top", { duration: 220, easing: "ease-out" })
-      .child(v_flex().id("md-help").w(w).max_h(Math.max(160, this.viewH - 36)).overflow_y_scrollbar()
+      .child(v_flex().id("md-help").w(w).overflow_hidden()
         .py(10).rounded(10).bg(t.popover).border_1().border_color(t.input).shadow_md().text_size(13).font_family(BODY())
-        .child(div().px(16).pb(8).text_size(11).text_color(t.dim).child("KEYS · any key closes"))
-        .child(h_flex().flex_wrap().items_start().children(HELP.map(col => v_flex().flex_1().min_w(320)
+        .on_scroll_wheel((e, cx) => { cx.stop_propagation(); this.scrollHelp(-e.delta.y / Z(), cx); })
+        .child(div().px(16).pb(8).text_size(11).text_color(t.dim).child(scrolls ? "KEYS · j/k or scroll · any other key closes" : "KEYS · any key closes"))
+        .child(div().id("md-help-view").relative().overflow_hidden().w_full().h(viewH)
+          .on_size_change((size, cx) => { this.helpViewH = size.height / Z(); })
+          .when(scrolls, el => el.child(div().absolute().right(3).w(5).rounded(3).bg(t.border)
+            .h(Math.max(24, viewH * viewH / this.helpH)).top((viewH - Math.max(24, viewH * viewH / this.helpH)) * (this.helpY ?? 0) / Math.max(1, this.helpH - viewH))
+            .transition("top", { duration: STEP, easing: "ease-out" })))
+        .child(h_flex().absolute().left(0).w_full().top(-(this.helpY ?? 0)).transition("top", { duration: STEP, easing: "ease-out" })
+          .on_size_change((size, cx) => { const h = size.height / Z(); if (Math.abs(h - (this.helpH ?? 0)) > 0.5) { this.helpH = h; cx.notify(); } })
+          .flex_wrap().items_start().children(HELP.map(col => v_flex().flex_1().min_w(320)
           .children(col.map(([section, rows]) => v_flex().px(16).pb(8)
             .child(div().pb(2).text_size(11).font_semibold().text_color(t.accent).child(section))
             .children(rows.map(([keys, what]) => h_flex().gap(10).items_center().py(1)
               .child(h_flex().w(118).flex_none().gap(4).text_size(12).children(keys.split(" ").map(key)))
-              .child(div().flex_1().min_w(0).text_color(t.muted).child(what))))))))));
+              .child(div().flex_1().min_w(0).text_color(t.muted).child(what)))))))))));
   }
 
   // ---- cursor ----
@@ -1366,8 +1394,8 @@ export default class Md extends View {
     }
     const mod = e.modifiers ?? {};
     if (mod.platform || mod.alt) return;
-    if (this.help) { if (!MODIFIER_KEYS.includes(e.key)) this.closeHelp(cx); return cx.stop_propagation(); }
     const k = mod.shift && e.key.length === 1 ? (e.key_char ?? e.key.toUpperCase()) : e.key;
+    if (this.help) { if (!MODIFIER_KEYS.includes(e.key)) this.helpKeys(k, mod, cx); return cx.stop_propagation(); }
     if (this.zoom) return this.zoomKeys(k, mod, cx);
     const half = Math.max(80, this.viewH / 2), page = Math.max(100, this.viewH - 80);
     if (this.outline) {

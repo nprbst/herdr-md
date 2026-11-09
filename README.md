@@ -167,7 +167,7 @@ block). For Claude Code there's a ready skill in
 | `/` then `Enter` / `Shift-Enter`, `n` `N` | search; next / previous match (or highlight) |
 | `#` | line numbers on/off |
 | `Esc` | leave visual mode, close search, clear the sent selection |
-| `?` or `h` | key help (any key closes it) |
+| `?` or `h` | key help: `j` `k`, `ctrl-d` `ctrl-u`, `g` `G` or the mouse wheel scroll it; any other key closes it |
 | `q` | close the viewer |
 
 Clicking a heading folds it too.
