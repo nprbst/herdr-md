@@ -15,6 +15,7 @@ Herdr's own docs are the truth: `~/.config/herdr-app/AGENTS.md`, `gpui-kit.d.ts`
 - `EditorState.new` throws inside `render`: create it at load.
 - `TextView.markdown` inherits size/font but ignores parent `text_color`.
 - `image()` only loads files under the Herdr home: images are copied into `.cache/`.
+- Build Herdr-home paths from `appHome()`, never `home()/.config/herdr-app`: under `HERDR_APP_HOME` the hardcoded path copies media to the wrong home and videos show black.
 - `on_size_change` sizes and wheel deltas are zoomed pixels; `top()`/`h()` take zoom-1 units: divide by `settings().zoom`.
 - No programmatic scroll for plain divs: the viewer is its own viewport (`top(-offset)` + `transition("top")`).
 - `"focus"` from `nextCommand()` also fires when a popup over the pane closes: re-take the keyboard only if `panes()` still shows this mod focused ~60ms later.
