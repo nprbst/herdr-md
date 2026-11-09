@@ -880,7 +880,7 @@ export default class Md extends View {
       .when(Boolean(picked) && i === this.picked[0], el => el.child(h_flex().mb(2).gap(6).items_center().text_size(11).text_color(t.ansi4)
         .child(div().child("📌 Pinned for Claude")).child(div().text_color(t.dim).child("· Esc unpins"))))
       .when(changed, el => el.child(div().absolute().left(-12).top(gone ? 26 : 4).bottom(4).w(3).rounded(2).bg(t.ansi2)))
-      .when(this.numbers !== "off", el => el.child(h_flex().justify_end().absolute().left(-PAD - 4).top(numTop).w(PAD - 14).font_family(BODY()).text_size(12).line_height(1.6)
+      .when(this.numbers !== "off", el => el.child(h_flex().justify_end().absolute().left(-PAD - 12).top(numTop).w(PAD - 14).font_family(BODY()).text_size(12).line_height(1.6)
         .text_color(cur ? t.accent : t.dim).when(cur, el => el.font_semibold())
         .child(div().id(`num-${i}`).when(cur && cp.badge, el => el.px(6).mr(-6).rounded(4).bg(t.accent + "26")).when(cur, el => animate(el, cp.numAnim))
           .child(gutterLabel(this.numbers, i, this.cursor, tok.from, this.ord)))))
