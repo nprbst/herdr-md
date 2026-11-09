@@ -40,39 +40,41 @@ Keep competitor comparisons and star counts out of the copy; let the demo make t
 
 - **As recorded (2026-11-08):** the Herdr window here is a 3820x1060pt ultrawide tile, not 1600x900, so the take runs in a Herdr space `demo` laid out shell | viewer | blank filler pane, dividers dragged until shell + viewer fill a 16:9 region, and the edit crops the filler and the Fleet sidebar away. theGrid records the window (`target=window`, mov, 60fps, `cursor=false`; it arrives as 4096x1136 VFR, post forces 60fps). Driver: `TAKE=/private/tmp/herdr-md-take CLICK_FX=0.32 PARK="X Y" scripts/drive-take.sh --shell T` (a physical TAKE path: `mdh` resolves relative paths against the physical cwd; PARK moves the pointer out of frame because the recorder draws it). Working files, post scripts and re-run steps: `~/Movies/herdr-md-launch/README.md`.
 
-### Storyboard (master, 60s)
+### Storyboard v2 (master, ~59s; reshot 2026-11-08)
 
-Captions are muted-first: 6 words or fewer, one per beat. No shot runs over 5s
-(cut the longer beats into two shots in the edit). The driver's beats and
-captions match this table.
+The first cut skipped images, video, figure zoom, the picker and theming; the
+owner asked for them. Same rules: a headline of 6 words or fewer per scene,
+footage at 87% of the frame, the /brag register (dark canvas, teal glow, title
+and end cards, music: "Happy Beats & Business Moves Vol. 10" by Sascha Ende,
+ende.app, CC BY 4.0 with attribution optional; credit it anyway).
 
-| Time | On screen / action | Caption |
+| Scene | On screen / action | Headline |
 |---|---|---|
-| 0–3 | Tour top fills the viewer: title, Note callout, Reading, tasks, table | **Markdown and the terminal, done right.** |
-| 3–7 | `j` `j` `j`, `ctrl-d` glide, `ctrl-u` | **Vim keys. Smooth scrolling.** |
-| 7–12 | `o` outline, `j` ×3, `Enter` → Writing math | **Outline. Jump anywhere.** |
-| 12–15 | Hold the typeset loss formula | **Real math, typeset.** |
-| 15–19 | `}` → Diagrams, hold Mermaid | **Mermaid, in your theme.** |
-| 19–23 | `za`, pause, `za` | **Fold any section.** |
-| 23–28 | `/` "theme", `Enter` (glides to the Note), `n` (the Code paragraph), `Esc` | **Search as you read.** |
-| 28–33 | `G`, `Enter` on the link → second page, `Backspace` | **Links open in place.** |
-| 33–36 | `cp after.md "$F"`: glide up to Reading, three gutter marks, "3 changed" (the one before/after) | **The file changes. See what.** |
-| 36–39 | `]`, `]` | **Jump change to change.** |
-| 39–43 | Bonus: `mdh hl "$F" --text 'Select a few blocks' --note '…'`: glide, tint, note types in | **Bonus: your agent points.** |
-| 43–46 | `V` `j` `p`: "📌 Pinned for Claude" | **You point back.** |
-| 46–49 | `mdh sel` in the shell: file, lines, source | **Same file. Exact lines.** |
-| 49–60 | End card over a frozen frame, held ≥3s | **herdr-md for Herdr** · `add the mod github.com/ryanthedev/herdr-md` |
+| Title | Kicker "a mod for herdr" | **Markdown and the terminal, done right.** |
+| Keys | `j` `j` `j`, `ctrl-d` glide, `ctrl-u` | **Vim keys. Smooth scrolling.** |
+| Picker | `ctrl-p`, type "med", live preview, `Enter` opens media.md | **Find any doc. Live preview.** |
+| Image | `j` ×3 to the chart, `Enter` zooms, `+`, pan `l` `l`, `Esc` | **Images inline. Zoom into any figure.** |
+| GIF | `}` `j`: the loss curve animates | **GIFs animate.** |
+| Video | `}` `j` `j`, `Enter` plays the fitting clip | **Videos play in place.** |
+| Outline | `Backspace` to the tour, `o`, `j` `j`, `Enter` (sped 1.5x) | **Outline. Jump anywhere.** |
+| Math | `j` `j`, `Enter` zooms the formula, `+`, `Esc` | **Real math, typeset.** |
+| Diagram | `}` `j`, `Enter`, `+`, pan, `Esc` | **Diagrams you can explore.** |
+| Theme | Light appearance (paper), then dark Tokyo Night: figures re-render | **Follows your theme.** |
+| Change | `cp after.md`: glide, three marks, "3 changed", `]` | **See exactly what changed.** |
+| Bonus | `mdh hl … --note …`: tint, note types in | **Bonus: your agent points.** |
+| Pin | `n` `V` `p`: "Pinned for Claude" | **You point back.** |
+| Sel | `mdh sel` in the shell | **Same file. Exact lines.** |
+| End | `add the mod github.com/ryanthedev/herdr-md` | **herdr-md** |
 
-### Storyboard (short, ~24s)
+The square short (~24s) is cut from the same take: title, picker, zoom, video,
+theme, bonus, end.
 
-| Time | On screen / action | Caption |
-|---|---|---|
-| 0–2 | Tour top (the hook frame is the first frame) | **Markdown and the terminal, done right.** |
-| 2–7 | `o`, `j` ×3, `Enter` → typeset math | **Outline. Typeset math.** |
-| 7–10 | `}` → Mermaid | **Mermaid, in your theme.** |
-| 10–14 | `cp after.md "$F"`: glide, three marks; `]` | **See exactly what changed.** |
-| 14–19 | `mdh hl … --note …`: tint, note types in | **Bonus: your agent points.** |
-| 19–24 | End card, held 4s+ | `add the mod github.com/ryanthedev/herdr-md` |
+**Recording v2:** an isolated Herdr (`open -n -a Herdr --env HERDR_APP_HOME=~/.cache/hdt`)
+on the second display, so no key press can reach the person's agents (terminals
+are shared through herdr-core: record in a dedicated space with a bare `zsh -f`).
+`~/Movies/herdr-md-launch/work/frame-iso.sh` resets and frames each take; the
+driver takes `WIN`, `CX`, `CY`, `PARK` and `HERDR_APP_HOME`. Post:
+`work/render2.py master|short`.
 
 "Since you last looked" (close, edit, reopen) is a separate optional beat.
 

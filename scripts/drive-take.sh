@@ -15,6 +15,10 @@
 #              window (default 0.505, viewer in the middle column)
 #   PARK       env: "X Y" screen point to park the pointer after each click,
 #              outside the frame you crop (the recorder draws the pointer)
+#   WIN CX CY  env: the theGrid window id and the screen point to click (the
+#              viewer's status bar) instead of finding them; needed when two
+#              Herdr windows are open (an isolated HERDR_APP_HOME one for takes)
+#   HERDR_APP_HOME  env: the Herdr to drive; the theme beat edits its settings.json
 #
 # This script presses keys in the Herdr window (theGrid `input`). Don't run it
 # while someone else is typing. Beat start times land in $TAKE/beats.tsv for
@@ -43,10 +47,12 @@ case $CUT in master|short) ;; *) echo "drive-take: --cut master|short" >&2; exit
 if [ $DRY = 0 ]; then
   [ -f "$TAKE/viewer.pane" ] || { echo "drive-take: run scripts/take-setup.sh first" >&2; exit 1; }
   PANE=$(cat "$TAKE/viewer.pane")
-  WIN=$(thegrid window find --app Herdr --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["windowId"])')
-  # Click target: the viewer's status bar, empty middle (viewer is the middle
-  # column of the take layout; fractions of the Herdr window frame).
-  read -r CX CY < <(thegrid window find --app Herdr --json | FX=${CLICK_FX:-0.505} python3 -c 'import json,os,sys; f=json.load(sys.stdin)["matches"][0]["frame"]; print(int(f["x"]+f["width"]*float(os.environ["FX"])), int(f["y"]+f["height"]*0.945))')
+  if [ -z "${WIN:-}" ]; then
+    WIN=$(thegrid window find --app Herdr --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["windowId"])')
+    # Click target: the viewer's status bar, empty middle (viewer is the middle
+    # column of the take layout; fractions of the Herdr window frame).
+    read -r CX CY < <(thegrid window find --app Herdr --json | FX=${CLICK_FX:-0.505} python3 -c 'import json,os,sys; f=json.load(sys.stdin)["matches"][0]["frame"]; print(int(f["x"]+f["width"]*float(os.environ["FX"])), int(f["y"]+f["height"]*0.945))')
+  fi
 else
   PANE=PANE WIN=WIN CX=X CY=Y
 fi
@@ -78,14 +84,14 @@ beat() {
 # symbols become shift chords (V is shift+v, } is shift+]).
 focus_viewer() {
   run herdr-app do pane.focus "{\"pane\":\"$PANE\"}"; pause 0.15
-  run thegrid input click "$CX" "$CY"
-  [ -n "${PARK:-}" ] && run thegrid input move $PARK
+  run thegrid input click -- "$CX" "$CY"
+  [ -n "${PARK:-}" ] && run thegrid input move -- $PARK
   pause 0.6   # keys sooner than this get lost
 }
 keyname() {
   case $1 in
     [[:upper:]]) printf 'shift+%s' "$(printf %s "$1" | tr A-Z a-z)" ;;
-    '{') printf 'shift+[' ;; '}') printf 'shift+]' ;; '?') printf 'shift+/' ;;
+    '{') printf 'shift+[' ;; '}') printf 'shift+]' ;; '?') printf 'shift+/' ;; '+') printf 'shift+=' ;;
     *) printf %s "$1" ;;
   esac
 }
@@ -97,6 +103,16 @@ k() {
 }
 # Type a word into the search prompt, one key per letter.
 word() { local i; for ((i = 0; i < ${#1}; i++)); do run thegrid input key "${1:i:1}" --window "$WIN"; done; }
+
+# Theme: Herdr's appearance (light or dark, in settings.json) and, for dark,
+# a theme name. Off camera; only the viewer's repaint is filmed.
+look() {
+  local s="${HERDR_APP_HOME:-$HOME/.config/herdr-app}/settings.json"
+  if [ $DRY = 1 ]; then say "look $*"; return; fi
+  python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["appearance"]=sys.argv[2]; json.dump(d,open(p,"w"),indent=2)' "$s" "$1"
+  [ -n "${2:-}" ] && herdr-app do app.theme "{\"name\":\"$2\"}" >/dev/null
+  return 0
+}
 
 # An agent-side command: visible in the --shell terminal, or run here.
 agent() {
@@ -122,23 +138,27 @@ if [ $CUT = master ]; then
   pause 3
   beat keys   "Vim keys. Smooth scrolling."
   k j j j; pause 0.4; k ctrl+d; pause 1.2; k ctrl+u; pause 1
-  beat outline "Outline. Jump anywhere."
-  k o; pause 1.2; k j j; pause 0.9; k enter; pause 1.6          # o opens on the current section (Reading): j j is Writing math
+  beat picker "Find any doc. Live preview."
+  k ctrl+p; pause 0.9; word med; pause 1.6; k enter; pause 1.2   # picker filters to media.md, Enter opens it here
+  beat image  "Images, inline."
+  k j j j; pause 1.6                                             # title, intro, heading: j j j is the chart
+  beat zoom   "Zoom into any figure."
+  k enter; pause 1; k + ; pause 0.5; k l l; pause 1.2; k escape; pause 0.6
+  beat gif    "GIFs animate."
+  k '}' j; pause 2.4
+  beat video  "Videos play in place."
+  k '}' j j; pause 0.5; k enter; pause 3.4                       # heading, text, video; Enter plays
   beat math   "Real math, typeset."
-  pause 3
-  beat mermaid "Mermaid, in your theme."
-  k '}'; pause 3.5
-  beat fold   "Fold any section."
-  k z a; pause 1.4; k z a; pause 1.4
-  beat search "Search as you read."
-  k /; pause 0.3; word theme
-  pause 0.6; k enter; pause 1.8; k escape; pause 0.4      # typing lands on the Note; Enter steps on (n would be typed)
-  beat links  "Links open in place."
-  k G; pause 0.9; k enter; pause 1.6; k backspace; pause 1.4
-  beat change "The file changes. See what."
+  k backspace; pause 1; k o; pause 1; k j j; pause 0.6; k enter; pause 1; k j j; pause 0.6
+  k enter; pause 1.1; k +; pause 1.2; k escape; pause 0.5        # the display formula, zoomed
+  beat mermaid "Diagrams you can explore."
+  k '}' j; pause 1; k enter; pause 1; k + ; pause 0.4; k l l l; pause 1.2; k escape; pause 0.5
+  beat theme  "Follows your theme."
+  look light; pause 2.6; look dark tokyo-night; pause 2.6
+  beat change "See exactly what changed."
+  k g g; pause 0.6
   agent "cp $SA $SF"; pause 3                      # glide, three marks, "3 changed"
-  beat step   "Jump change to change."
-  k ']'; pause 1.2; k ']'; pause 1.4
+  k ']'; pause 1.2; k ']'; pause 1.2
   beat bonus  "Bonus: your agent points."
   agent "mdh hl $SF --text 'Select a few blocks' --note 'Pin the lines you mean, and I read exactly those.'"
   pause 4
