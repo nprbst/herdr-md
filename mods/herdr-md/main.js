@@ -220,6 +220,7 @@ export default class Md extends View {
         cx.notify();
         await this.loadVideos(tokens, cx);
         cx.notify();
+        this.figTokens = tokens; this.figSig = this.figTheme();
         await this.renderFigures(tokens);
       } catch (e) { if (!stale()) this.error = String(e); }
       cx.notify();
@@ -642,20 +643,29 @@ export default class Md extends View {
     return fnv(JSON.stringify([isMath(tok) ? "m" : "d", tok.text, t.foreground, t.surface, settings().font_family, 1]));
   }
 
+  // What figures are drawn with: a change (a theme switch) renders them again.
+  figTheme() {
+    const t = theme();
+    return [t.foreground, t.surface, t.raised, t.background, t.ansi4, t.ansi5, t.dim, settings().font_family].join("|");
+  }
+
   // Render every display formula and Mermaid diagram not already cached, in one
-  // batch (one Chrome launch for all diagrams).
+  // batch (one Chrome launch for all diagrams). A figure keeps showing its old
+  // image (the last theme's) until the new one is ready, so nothing jumps.
   async renderFigures(tokens) {
-    const t = theme(), font = settings().font_family || "sans-serif", jobs = [];
+    const t = theme(), font = settings().font_family || "sans-serif", jobs = [], waiting = [];
     const root = `${appHome()}/${FIG}`;
     marked.walkTokens(tokens, tok => {
       if (!isMath(tok) && !isMermaid(tok)) return;
-      const key = this.figKey(tok); tok.fig = key;
-      if (this.figs[key]?.path || this.figs[key]?.error) return;
+      const key = this.figKey(tok);
+      if (this.figs[key]?.path || this.figs[key]?.error || !tok.fig || !this.figs[tok.fig]?.path) tok.fig = key;
+      else waiting.push([tok, key]);
+      if (this.figs[key]?.path || this.figs[key]?.error || this.figs[key]?.pending) return;
       this.figs[key] = { pending: true };
       jobs.push({ kind: isMath(tok) ? "math" : "mermaid", src: tok.text, out: `${root}/${key}.${isMath(tok) ? "svg" : "png"}`, color: t.foreground, exPx: 11, font,
         colors: { fg: t.foreground, surface: t.surface, raised: t.raised, bg: t.background, blue: t.ansi4, purple: t.ansi5, dim: t.dim } });
     });
-    if (!jobs.length) return;
+    if (!jobs.length) { for (const [tok, key] of waiting) tok.fig = key; return; }
     try {
       await exec("mkdir", ["-p", root]);
       const r = await this.runRenderer(JSON.stringify(jobs));
@@ -666,6 +676,7 @@ export default class Md extends View {
         this.figs[key] = res.error ? { error: res.error } : { path: `${FIG}/${key}.${res.out.split(".").pop()}`, w: res.w, h: res.h };
       }
     } catch (e) { for (const j of jobs) this.figs[j.out.split("/").pop().replace(/\.\w+$/, "")] = { error: String(e) }; }
+    for (const [tok, key] of waiting) tok.fig = key;
   }
 
   // Run the batch renderer, installing its npm packages on first use
@@ -1435,6 +1446,14 @@ export default class Md extends View {
 
   render(cx) {
     const t = theme();
+    if (this.figTokens && !this.figBusy && this.figTheme() !== this.figSig) {
+      this.figSig = this.figTheme(); this.figBusy = true;
+      const tokens = this.figTokens;
+      cx.spawn(async cx => {
+        try { await this.renderFigures(tokens); } finally { this.figBusy = false; }
+        if (this.figTokens === tokens) cx.notify();
+      });
+    }
     const thumbH = this.contentH > this.viewH ? Math.max(30, this.viewH * this.viewH / this.contentH) : 0;
     const thumbY = thumbH ? (this.viewH - thumbH) * this.offset / (this.contentH - this.viewH) : 0;
     return v_flex().id("md").size_full().min_h(0).bg(t.background).text_color(t.foreground)
