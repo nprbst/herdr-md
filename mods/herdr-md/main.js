@@ -9,7 +9,7 @@
 // them and scrolls to `focus` whenever `seq` changes.
 import { View, div, image } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, TextView, InputState, Input } from "gpui-base";
-import { props, readTextFile, watchFolder, exec, theme, settings, home, nextCommand, panes, focused, run } from "herdr";
+import { props, readTextFile, watchFolder, exec, theme, settings, home, appHome, nextCommand, panes, focused, run } from "herdr";
 import { marked, splitChunks, capSource, refDefs, lexChunk, blocks, LEX_MAX } from "./lex.js";
 import { inlineMath } from "./tex.js";
 import { hash as bhash, diffBlocks, slug, labelOf, inlineRoles, alertOf, ALERTS } from "./doc.js";
@@ -488,13 +488,13 @@ export default class Md extends View {
   async loadImages(tokens) {
     const srcs = [];
     marked.walkTokens(tokens, tok => { if (tok.type === "image" && !isVideo(tok.href) && !this.images[tok.href]) srcs.push(tok.href); });
-    await exec("mkdir", ["-p", `${home()}/.config/herdr-app/${CACHE}`]);
+    await exec("mkdir", ["-p", `${appHome()}/${CACHE}`]);
     for (const href of [...new Set(srcs)]) {
       if (/^[a-z]+:\/\//i.test(href)) { this.images[href] = { remote: true }; continue; }
       const abs = href.startsWith("/") ? href : `${dirname(this.file)}/${decodeURIComponent(href)}`;
       const ext = (abs.split(".").pop() || "png").toLowerCase();
       const name = abs.replace(/[^a-zA-Z0-9]+/g, "_").slice(-120) + "." + ext;
-      const cp = await exec("cp", ["-p", abs, `${home()}/.config/herdr-app/${CACHE}/${name}`]);
+      const cp = await exec("cp", ["-p", abs, `${appHome()}/${CACHE}/${name}`]);
       if (cp.code !== 0) { this.images[href] = { missing: true }; continue; }
       let w = 800, h = 450;
       const s = await exec("sips", ["-g", "pixelWidth", "-g", "pixelHeight", abs]);
@@ -525,7 +525,7 @@ export default class Md extends View {
       if (st.code !== 0) { v.missing = true; continue; }
       const key = fnv(v.abs + st.stdout.trim()), dir = `${CACHE}/v/${key}`;
       if (v.dir === dir && v.meta) continue;
-      v.dir = dir; v.absDir = `${home()}/.config/herdr-app/${dir}`; v.meta = null; v.st = stopped(); v.missing = false; v.error = null; v.extracting = null; cx.notify();
+      v.dir = dir; v.absDir = `${appHome()}/${dir}`; v.meta = null; v.st = stopped(); v.missing = false; v.error = null; v.extracting = null; cx.notify();
       let meta = null;
       try { meta = JSON.parse(await readTextFile(`${v.absDir}/meta.json`) ?? "null"); } catch {}
       if (!meta) {
@@ -646,7 +646,7 @@ export default class Md extends View {
   // batch (one Chrome launch for all diagrams).
   async renderFigures(tokens) {
     const t = theme(), font = settings().font_family || "sans-serif", jobs = [];
-    const root = `${home()}/.config/herdr-app/${FIG}`;
+    const root = `${appHome()}/${FIG}`;
     marked.walkTokens(tokens, tok => {
       if (!isMath(tok) && !isMermaid(tok)) return;
       const key = this.figKey(tok); tok.fig = key;
@@ -671,7 +671,7 @@ export default class Md extends View {
   // Run the batch renderer, installing its npm packages on first use
   // (MathJax and mermaid-cli; Chrome itself is not downloaded).
   async runRenderer(jobs) {
-    const dir = `${home()}/.config/herdr-app/mods/${MOD}/render`;
+    const dir = `${appHome()}/mods/${MOD}/render`;
     if (!this.deps) {
       const has = await exec("test", ["-d", `${dir}/node_modules/mathjax-full`]);
       if (has.code !== 0) {
@@ -932,7 +932,7 @@ export default class Md extends View {
   // The 4x PNG loads invisibly first (image() shows nothing while it decodes),
   // then replaces the 2x one in place.
   hiRes(tok, cx) {
-    const t = theme(), root = `${home()}/.config/herdr-app/${FIG}`, out = `${root}/${tok.fig}@4.png`, z = this.zoom;
+    const t = theme(), root = `${appHome()}/${FIG}`, out = `${root}/${tok.fig}@4.png`, z = this.zoom;
     cx.spawn(async cx => {
       const r = await this.runRenderer(JSON.stringify([{ kind: "mermaid", scale: 4, src: tok.text, out, font: settings().font_family || "sans-serif",
         colors: { fg: t.foreground, surface: t.surface, raised: t.raised, bg: t.background, blue: t.ansi4, purple: t.ansi5, dim: t.dim } }]));
@@ -1139,7 +1139,7 @@ export default class Md extends View {
         cx.notify();
         // Math and diagrams this machine already rendered (any document, same
         // source and colors) show as images; the rest stay placeholders.
-        const root = `${home()}/.config/herdr-app/${FIG}`; let found = false;
+        const root = `${appHome()}/${FIG}`; let found = false;
         for (const b of pv.blocks) {
           if (!b.fig || this.figs[b.fig]?.path) continue;
           const ext = isMath(b) ? "svg" : "png";
