@@ -126,6 +126,13 @@ export default class Md extends View {
     this.input.on("submit", (e, cx) => { this.step(e?.shift ? -1 : 1); cx.notify(); });
     this.input.on("focus", (_e, cx) => { this.typing = true; cx.notify(); });
     this.input.on("blur", (_e, cx) => { this.typing = false; cx.notify(); });
+    // The key help's filter: / in the help, then type; Enter goes back to j/k.
+    this.helpQ = ""; this.helpTyping = false;
+    this.helpInput = InputState.new({ value: "", placeholder: "Search the keys (/)" });
+    this.helpInput.on("change", (_e, cx) => { this.helpQ = this.helpInput.value(); this.helpY = 0; cx.notify(); });
+    this.helpInput.on("submit", (_e, cx) => { this.handle.focus(); cx.notify(); });
+    this.helpInput.on("focus", (_e, cx) => { this.helpTyping = true; cx.notify(); });
+    this.helpInput.on("blur", (_e, cx) => { this.helpTyping = false; cx.notify(); });
     // The ctrl-p picker. pick: { query, rows, sel, top, pvY } while open.
     this.pick = null; this.pickIn = 0; this.pickList = null; this.recent = []; this.pv = null; this.pvCache = new Map(); this.pvSeq = 0; this.pvLoading = false; this.pickVis = 12;
     this.pickInput = InputState.new({ value: "", placeholder: "Find a markdown file" });
@@ -1284,12 +1291,12 @@ export default class Md extends View {
   // own viewport: top(-helpY), plain divs can't be scrolled from code); any
   // other key fades it out, then it unmounts.
   openHelp(cx) {
-    this.help = true; this.helpIn = 0; this.helpY = 0; cx.notify();
+    this.help = true; this.helpIn = 0; this.helpY = 0; this.helpQ = ""; this.helpInput.set_value(""); cx.notify();
     cx.timer.after(16, cx => { this.helpIn = 1; cx.notify(); });
   }
 
   closeHelp(cx) {
-    this.helpIn = 0; cx.notify();
+    this.helpIn = 0; if (this.helpTyping) this.handle.focus(); cx.notify();
     cx.timer.after(180, cx => { if (!this.helpIn) { this.help = false; cx.notify(); } });
   }
 
@@ -1306,6 +1313,7 @@ export default class Md extends View {
     if (mod.control && k === "u") return this.scrollHelp(-half, cx);
     if (k === "g") return this.scrollHelp(-1e9, cx);
     if (k === "G") return this.scrollHelp(1e9, cx);
+    if (k === "/") { this.helpInput.focus(); cx.notify(); return; }
     this.closeHelp(cx);
   }
 
@@ -1314,12 +1322,24 @@ export default class Md extends View {
     const w = Math.min(720, Math.max(280, this.colW + PAD * 2 - 40));
     const maxView = Math.max(110, this.viewH - 36 - 48);   // the panel's max height minus its padding and header
     const viewH = Math.min(this.helpH ?? maxView, maxView), scrolls = (this.helpH ?? 0) > maxView + 0.5;
+    // The filter: every word must appear in the section name, the keys or the description.
+    const words = this.helpQ.toLowerCase().split(/\s+/).filter(Boolean);
+    const hit = (section, [keys, what]) => words.every(w => `${section} ${keys} ${what}`.toLowerCase().includes(w));
+    const cols = HELP.map(col => col.map(([section, rows]) => [section, rows.filter(r => hit(section, r))]).filter(([, rows]) => rows.length)).filter(col => col.length);
+    const count = cols.reduce((n, col) => n + col.reduce((m, [, rows]) => m + rows.length, 0), 0);
     return h_flex().id("md-help-wrap").absolute().left(0).w_full().justify_center().top(this.helpIn ? 18 : 30)
       .opacity(this.helpIn).transition("opacity", { duration: 180, easing: "ease-out" }).transition("top", { duration: 220, easing: "ease-out" })
       .child(v_flex().id("md-help").w(w).overflow_hidden()
         .py(10).rounded(10).bg(t.popover).border_1().border_color(t.input).shadow_md().text_size(13).font_family(BODY())
         .on_scroll_wheel((e, cx) => { cx.stop_propagation(); this.scrollHelp(-e.delta.y / Z(), cx); })
-        .child(div().px(16).pb(8).text_size(11).text_color(t.dim).child(scrolls ? "KEYS · j/k or scroll · any other key closes" : "KEYS · any key closes"))
+        // The filter box is always mounted (focusing an unmounted Input loses the keyboard).
+        .child(h_flex().mx(12).mb(8).h(30).px(8).gap(8).items_center().rounded(8).bg(t.background)
+          .border_1().border_color(this.helpTyping ? t.accent : t.input)
+          .child(div().text_color(t.dim).text_size(13).child("⌕"))
+          .child(Input.new(this.helpInput).flex_1().h(24).text_size(13).text_color(t.foreground).font_family(BODY()))
+          .child(div().flex_none().text_size(11).text_color(this.helpQ && !count ? t.blocked : t.dim)
+            .child(this.helpTyping ? (this.helpQ ? `${count} key${count === 1 ? "" : "s"} · Enter: j/k · Esc` : "Enter: j/k · Esc")
+              : this.helpQ ? `${count} key${count === 1 ? "" : "s"} · / edit` : (scrolls ? "/ search · j/k scroll · other keys close" : "/ search · other keys close"))))
         .child(div().id("md-help-view").relative().overflow_hidden().w_full().h(viewH)
           .on_size_change((size, cx) => { this.helpViewH = size.height / Z(); })
           .when(scrolls, el => el.child(div().absolute().right(3).w(5).rounded(3).bg(t.border)
@@ -1327,7 +1347,9 @@ export default class Md extends View {
             .transition("top", { duration: STEP, easing: "ease-out" })))
         .child(h_flex().absolute().left(0).w_full().top(-(this.helpY ?? 0)).transition("top", { duration: STEP, easing: "ease-out" })
           .on_size_change((size, cx) => { const h = size.height / Z(); if (Math.abs(h - (this.helpH ?? 0)) > 0.5) { this.helpH = h; cx.notify(); } })
-          .flex_wrap().items_start().children(HELP.map(col => v_flex().flex_1().min_w(320)
+          .flex_wrap().items_start()
+          .when(!count, el => el.child(div().px(16).py(6).text_color(t.dim).italic().child("No keys match")))
+          .children(cols.map(col => v_flex().flex_1().min_w(320)
           .children(col.map(([section, rows]) => v_flex().px(16).pb(8)
             .child(div().pb(2).text_size(11).font_semibold().text_color(t.accent).child(section))
             .children(rows.map(([keys, what]) => h_flex().gap(10).items_center().py(1)
@@ -1388,6 +1410,14 @@ export default class Md extends View {
 
   keys(e, cx) {
     if (this.pick) return this.pickKeys(e, cx);
+    if (this.helpTyping) {
+      // Esc empties the filter first, then leaves the box; the help stays open.
+      if (e.key === "escape") {
+        if (this.helpQ) { this.helpInput.set_value(""); this.helpQ = ""; this.helpY = 0; } else this.handle.focus();
+        cx.notify(); cx.stop_propagation();
+      }
+      return;
+    }
     if (this.typing) {
       if (e.key === "escape") { this.closeSearch(cx); cx.stop_propagation(); }
       return;
