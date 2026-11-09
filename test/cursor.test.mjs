@@ -13,8 +13,8 @@ test("C and B cycle through every option and wrap", () => {
 });
 
 test("a missing or bad saved choice falls back to the defaults", () => {
-  assert.deepEqual(parseCursorPref(null), { look: "bar", motion: "steady" });
-  assert.deepEqual(parseCursorPref("{nope"), { look: "bar", motion: "steady" });
+  assert.deepEqual(parseCursorPref(null), { look: "bar", motion: "blink number" });
+  assert.deepEqual(parseCursorPref("{nope"), { look: "bar", motion: "blink number" });
   assert.deepEqual(parseCursorPref('{"look":"zap","motion":"blink both"}'), { look: "bar", motion: "blink both" });
 });
 

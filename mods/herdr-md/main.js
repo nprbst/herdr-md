@@ -45,7 +45,7 @@ const HELP = [[
   ["READ", [["ctrl-p", "find a markdown file, with preview"], ["o", "outline"], ["Enter", "fold a heading, follow a link, zoom a figure, play a video"], ["O", "open a video in QuickTime"], ["Backspace", "back after a link"],
     ["za zc zo", "toggle / close / open fold"], ["zM zR", "fold / unfold all"], ["] [", "next / previous change"], ["c", "clear change marks"],
     ["/", "search"], ["n N", "next / previous match or note"], ["#", "line numbers: absolute, relative, off"],
-    ["C", "cursor look: bar, highlight, number badge, lift"], ["B", "cursor motion: steady, pulse, grow, blink"]]],
+    ["C", "cursor look: bar, highlight, number badge, lift"], ["B", "cursor motion: blink (default), steady, pulse, grow"]]],
   ["ZOOM (Enter on a diagram or image)", [["h j k l", "pan (or drag, or scroll)"], ["+ -", "zoom in / out (or ctrl-scroll)"], ["0", "fit"], ["Esc", "close"]]],
   ["VIEWER", [["? h", "this help"], ["q", "close the viewer"]]],
 ]];
@@ -140,7 +140,7 @@ export default class Md extends View {
     this.help = false; this.helpIn = 0; this.zoom = null; this.viewW = 0;
     this.query = ""; this.matches = []; this.mi = 0; this.searching = false; this.typing = false;
     // Vim-ish cursor: one rendered block is one "line". anchor !== null means visual mode.
-    this.cursor = 0; this.anchor = null; this.pending = ""; this.count = ""; this.numbers = "absolute"; this.look = "bar"; this.cmotion = "steady"; this.resting = true; this.restAt = 0; this.restGen = 0; this.picked = null; this.src = ""; this.lines = 0;
+    this.cursor = 0; this.anchor = null; this.pending = ""; this.count = ""; this.numbers = "absolute"; this.look = "bar"; this.cmotion = "blink number"; this.resting = true; this.restAt = 0; this.restGen = 0; this.picked = null; this.src = ""; this.lines = 0;
     this.handle = cx.focus_handle();
     this.input = InputState.new({ value: "", placeholder: "Search" });
     this.input.on("change", (_e, cx) => { this.search(this.input.value()); this.aimAt(this.matches[this.mi = 0]); cx.notify(); });

@@ -106,7 +106,7 @@ export function parseCursorPref(text) {
   let p = null; try { p = JSON.parse(text); } catch { /* missing or bad: defaults */ }
   return {
     look: CURSOR_LOOKS.includes(p?.look) ? p.look : "bar",
-    motion: CURSOR_MOTIONS.includes(p?.motion) ? p.motion : "steady",
+    motion: CURSOR_MOTIONS.includes(p?.motion) ? p.motion : "blink number",
   };
 }
 
