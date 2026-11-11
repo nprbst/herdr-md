@@ -139,6 +139,7 @@ export function blocks(src, tokens, base = 0) {
   const out = [];
   for (const tok of tokens) {
     if (tok.type === "list") tok.items.forEach((item, j) => out.push({ type: "listitem", item, list: tok, n: (tok.start || 1) + j, raw: item.raw }));
+    else if (tok.type === "table") out.push(...tableRows(tok));
     // Space and comment-only HTML render nothing, so they aren't blocks (no cursor stop).
     // Safe: each block's lines come from finding its raw text, not from counting.
     else if (tok.type !== "space" && !isComment(tok)) out.push(tok);
@@ -158,6 +159,21 @@ export function blocks(src, tokens, base = 0) {
     if (at >= 0) cursor = end;
   }
   return out;
+}
+
+// A table is one block per row, so the cursor steps through it: the header
+// (with its |---| line) is row -1, body rows are 0…n-1. Every GFM row is one
+// source line. All rows share the table token, which holds the column widths.
+// A header with no text isn't shown, so it isn't a stop. Anything unexpected
+// keeps the table whole.
+export function tableRows(tok) {
+  const lines = tok.raw.replace(/\n+$/, "").split("\n");
+  if (lines.length !== tok.rows.length + 2) return [tok];
+  const head = tok.header.some(h => h.text.trim());
+  const out = head ? [{ type: "trow", table: tok, r: -1, raw: `${lines[0]}\n${lines[1]}` }] : [];
+  tok.rows.forEach((_row, r) => out.push({ type: "trow", table: tok, r, raw: lines[r + 2] }));
+  out.forEach((b, k) => { b.first = k === 0; b.last = k === out.length - 1; });
+  return out.length ? out : [tok];
 }
 
 // The whole text lexed chunk by chunk, at once (tests, and the benchmark).

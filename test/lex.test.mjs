@@ -199,4 +199,19 @@ t("capSource: small files whole, huge ones cut at a boundary with line counts", 
   assert.ok(LEX_MAX >= 500000 && LEX_MAX < 1048576, "under what Herdr reads whole");
 });
 
+t("a table is one block per row: the header with its |---| line, then each row on its own line", () => {
+  const text = "# T\n\n| a | b \\| c |\n|:--|--:|\n| 1 | 2 |\n| 3 | `x|y` |\n\npara\n";
+  const bs = lexAll(text).blocks;
+  assert.deepEqual(bs.map(b => [b.type, b.r, b.from, b.to, b.first, b.last]), [
+    ["heading", undefined, 1, 1, undefined, undefined],
+    ["trow", -1, 3, 4, true, false],
+    ["trow", 0, 5, 5, false, false],
+    ["trow", 1, 6, 6, false, true],
+    ["paragraph", undefined, 8, 8, undefined, undefined]]);
+  assert.ok(bs[1].table === bs[3].table, "rows share the table token");
+  // An empty header isn't shown, so it isn't a stop.
+  const noHead = lexAll("|  |  |\n|--|--|\n| 1 | 2 |\n").blocks;
+  assert.deepEqual(noHead.map(b => [b.type, b.r, b.from, b.first, b.last]), [["trow", 0, 3, true, true]]);
+});
+
 console.log(`${n} passed`);

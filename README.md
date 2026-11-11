@@ -184,8 +184,8 @@ mdh video FILE [N] seek 0:12                              # jump; keeps playing 
 ```
 
 Notes are markdown. Colors: yellow (default), green, red, blue, purple, cyan.
-Highlights snap to whole blocks (a paragraph, heading, list item, table, code
-block). For Claude Code there's a ready skill in
+Highlights snap to whole blocks (a paragraph, heading, list item, table row,
+code block). For Claude Code there's a ready skill in
 [`skills/md-viewer/SKILL.md`](skills/md-viewer/SKILL.md): copy it to
 `~/.claude/skills/md-viewer/`.
 
@@ -193,7 +193,7 @@ block). For Claude Code there's a ready skill in
 
 | Keys | |
 |---|---|
-| `j` `k` (counts: `5j`), `gg` `G` | move the cursor (one block is one line) |
+| `j` `k` (counts: `5j`), `gg` `G` | move the cursor (one block is one line; a table steps row by row) |
 | `ctrl-d` `ctrl-u`, `ctrl-f` `ctrl-b`, `space` | half / full page |
 | `ctrl-e` `ctrl-y` | scroll a line, cursor stays |
 | `{` `}` | previous / next heading |
@@ -203,7 +203,7 @@ block). For Claude Code there's a ready skill in
 | `Backspace` | back after following a link (web links open in your browser; local non-markdown files are only shown in Finder, never launched) |
 | `zz` · `za` `zc` `zo` · `zM` `zR` | center · toggle/close/open fold · fold/unfold all |
 | `V` then `j`/`k` | select blocks |
-| `y` | copy the selection's markdown source |
+| `y` | copy the selection's markdown source (table rows bring their header along) |
 | `p` | pin the selection for the agent (`mdh sel` reads it) |
 | `Enter` | fold the heading, follow the first link in the block, zoom a diagram or image, or play/pause a video |
 | `O` | open the video under the cursor in QuickTime Player |

@@ -304,7 +304,9 @@ export default class Md extends View {
     for (const b of list) {
       const l = labelOf(b);
       if (l) {
-        const target = out.length - 1;
+        // A table's label names the whole table: its first row.
+        let target = out.length - 1;
+        while (target > 0 && out[target].type === "trow" && !out[target].first) target--;
         if (target >= 0) {
           const t = out[target];
           if (l.eq) t.eqNum = ++eq;
@@ -842,39 +844,15 @@ export default class Md extends View {
       case "hr":
         return div().my(16).h(1).bg(t.border);
       case "table": {
-        // Auto layout, like a browser's: every column gets at least its longest
-        // word (min) and shares the rest by content length (max). If even the
-        // mins don't fit, only the widest columns give way. No text measuring
-        // here, so widths are estimated from a monospace advance (0.6em) and padded.
-        const ch = SIZE.body * 0.62, padX = 24 + 6, cells = c => [tok.header[c], ...tok.rows.map(r => r[c])].map(x => plain(x?.tokens) || x?.text || "");
-        const cols = tok.header.map((_h, c) => cells(c));
-        const words = tok.header.map((_h, c) => [tok.header[c], ...tok.rows.map(r => r[c])].map(x => solid(x?.tokens) || x?.text || ""));
-        const min = words.map(xs => padX + ch * Math.max(1, ...xs.flatMap(s => s.split(/\s+/).map(w => [...w].length))));
-        const max = cols.map((xs, c) => Math.max(min[c], padX + ch * Math.max(...xs.map(s => [...s.trim()].length))));
-        const avail = this.colW - 2, sum = a => a.reduce((x, y) => x + y, 0);
-        let weight;
-        if (sum(max) <= avail) weight = max;
-        else if (sum(min) <= avail) weight = min.map((m, c) => m + (max[c] - m) * (avail - sum(min)) / (sum(max) - sum(min)));
-        else {
-          // Cap the widest columns at the level where the total just fits.
-          const sorted = [...min].sort((a, b) => a - b);
-          let cap = avail / min.length;
-          for (let k = 0, rest = avail; k < sorted.length; k++) {
-            if (sorted[k] * (sorted.length - k) > rest) { cap = rest / (sorted.length - k); break; }
-            rest -= sorted[k];
-          }
-          weight = min.map(m => Math.min(m, cap));
-        }
-        const cell = (c, j, key) => div().w(0).flex_grow(weight[j]).min_w(0).px(12).py(7)
-          .when(tok.align[j] === "right", el => el.text_right()).when(tok.align[j] === "center", el => el.text_center())
-          .child(this.inline(key, c.text));
         const hasHeader = tok.header.some(h => h.text.trim());
         return v_flex().my(8).rounded(8).overflow_hidden().border_1().border_color(t.border)
-          .when(hasHeader, el => el.child(h_flex().bg(t.surface).font_semibold().text_color(t.ansi4).children(tok.header.map((h, j) => cell(h, j, `${id}-h${j}`)))))
-          .children(tok.rows.map((row, r) => h_flex().when(r > 0 || hasHeader, el => el.border_t(1).border_color(t.border))
-            .when(r % 2 === 1, el => el.bg(t.canvas))
-            .children(row.map((c, j) => cell(c, j, `${id}-${r}-${j}`)))));
+          .when(hasHeader, el => el.child(this.tableRow(tok, -1, id, t).bg(t.surface)))
+          .children(tok.rows.map((_row, r) => this.tableRow(tok, r, id, t).when(r > 0 || hasHeader, el => el.border_t(1).border_color(t.border))
+            .when(r % 2 === 1, el => el.bg(t.canvas))));
       }
+      case "trow":
+        // One row of a top-level table; its frame and stripes are drawn by row().
+        return this.tableRow(tok.table, tok.r, id, t);
       case "html":
         if (isComment(tok)) return div();
         return div().py(2).text_size(13).text_color(t.dim).child(tok.raw.trim());
@@ -883,6 +861,47 @@ export default class Md extends View {
       default:
         return div().py(4).text_color(t.dim).child(this.inline(id, tok.raw?.trim() ?? ""));
     }
+  }
+
+  // A table's column widths, as flex-grow weights. Auto layout, like a
+  // browser's: every column gets at least its longest word (min) and shares the
+  // rest by content length (max). If even the mins don't fit, only the widest
+  // columns give way. No text measuring here, so widths are estimated from a
+  // monospace advance (0.6em) and padded. Kept on the token: a table split into
+  // row blocks needs one set of widths for all its rows.
+  tableWidths(tok) {
+    const avail = this.colW - 2;
+    if (tok.widths?.avail === avail) return tok.widths.weight;
+    const ch = SIZE.body * 0.62, padX = 24 + 6, all = c => [tok.header[c], ...tok.rows.map(r => r[c])];
+    const cols = tok.header.map((_h, c) => all(c).map(x => plain(x?.tokens) || x?.text || ""));
+    const words = tok.header.map((_h, c) => all(c).map(x => solid(x?.tokens) || x?.text || ""));
+    const min = words.map(xs => padX + ch * Math.max(1, ...xs.flatMap(s => s.split(/\s+/).map(w => [...w].length))));
+    const max = cols.map((xs, c) => Math.max(min[c], padX + ch * Math.max(...xs.map(s => [...s.trim()].length))));
+    const sum = a => a.reduce((x, y) => x + y, 0);
+    let weight;
+    if (sum(max) <= avail) weight = max;
+    else if (sum(min) <= avail) weight = min.map((m, c) => m + (max[c] - m) * (avail - sum(min)) / (sum(max) - sum(min)));
+    else {
+      // Cap the widest columns at the level where the total just fits.
+      const sorted = [...min].sort((a, b) => a - b);
+      let cap = avail / min.length;
+      for (let k = 0, rest = avail; k < sorted.length; k++) {
+        if (sorted[k] * (sorted.length - k) > rest) { cap = rest / (sorted.length - k); break; }
+        rest -= sorted[k];
+      }
+      weight = min.map(m => Math.min(m, cap));
+    }
+    tok.widths = { avail, weight };
+    return weight;
+  }
+
+  // One table row's cells; r = -1 is the header.
+  tableRow(tok, r, id, t) {
+    const weight = this.tableWidths(tok), head = r < 0;
+    const cell = (c, j) => div().w(0).flex_grow(weight[j]).min_w(0).px(12).py(7)
+      .when(tok.align[j] === "right", el => el.text_right()).when(tok.align[j] === "center", el => el.text_center())
+      .child(this.inline(head ? `${id}-h${j}` : `${id}-${r}-${j}`, c.text));
+    return h_flex().when(head, el => el.font_semibold().text_color(t.ansi4)).children((head ? tok.header : tok.rows[r]).map(cell));
   }
 
   // One top-level block, measured, with its highlight tint and note.
@@ -896,21 +915,27 @@ export default class Md extends View {
     const cp = cur ? cursorParts(this.look, this.resting ? this.cmotion : "steady", this.numbers !== "off") : null;
     const size = this.curSize?.i === i ? this.curSize : null, grows = Boolean(cp?.rowAnim?.startsWith("grow") && size);
     // Line number lined up with the block's first line of text.
-    const fs = tok.type === "heading" ? SIZE[`h${tok.depth}`] : SIZE.body;
-    const pad = tok.type === "heading" ? (tok.depth <= 2 ? 22 : 14) : { paragraph: 5, listitem: 2, code: 8, table: 8, blockquote: 8 }[tok.type] ?? 4;
+    const fs = tok.type === "heading" ? SIZE[`h${tok.depth}`] : SIZE.body, tr = tok.type === "trow" ? tok : null;
+    const pad = tok.type === "heading" ? (tok.depth <= 2 ? 22 : 14) : { paragraph: 5, listitem: 2, code: 8, table: 8, blockquote: 8, trow: 8 }[tok.type] ?? 4;
     const numTop = pad + (tok.type === "code" ? 2 : (fs * 1.65 - 19) / 2);
     const changed = this.changed.has(i), gone = this.removed.get(i);
-    return v_flex().id(`row-${i}`).relative()
+    return v_flex().id(`row-${i}`).relative().when(Boolean(tr?.first), el => el.mt(8)).when(Boolean(tr?.last), el => el.mb(8))
       .on_mouse_down("left", (_e, cx) => { if (this.zoom) return; this.cursor = i; this.rest(cx); this.handle.focus(); cx.notify(); })
       .when(Boolean(gone), el => el.child(this.removedMark(gone, t)))
-      .when(Boolean(picked) && i === this.picked[0], el => el.child(h_flex().mb(2).gap(6).items_center().text_size(11).text_color(t.ansi4)
+      .when(Boolean(picked) && i === this.picked[0] && (!tr || tr.first), el => el.child(h_flex().mb(2).gap(6).items_center().text_size(11).text_color(t.ansi4)
         .child(div().child("📌 Pinned for Claude")).child(div().text_color(t.dim).child("· Esc unpins"))))
       .when(changed, el => el.child(div().absolute().left(-12).top(gone ? 26 : 4).bottom(4).w(3).rounded(2).bg(t.ansi2)))
       .when(this.numbers !== "off", el => el.child(h_flex().justify_end().absolute().left(-PAD - 12).top(numTop).w(PAD - 14).font_family(BODY()).text_size(12).line_height(1.6)
         .text_color(cur ? t.accent : t.dim).when(cur, el => el.font_semibold())
         .child(numLabel(i, cur ? cp : null, gutterLabel(this.numbers, i, this.cursor, tok.from, this.ord), t))))
       .on_size_change((size, cx) => { if (this.heights[i] !== size.height / Z()) { this.heights[i] = size.height / Z(); this.reaim(); cx.notify(); } })
-      .child(div().id(`blk-${i}`).relative().px(14).mx(-14).rounded(6)
+      .child(div().id(`blk-${i}`).relative()
+        .when(!tr, el => el.px(14).mx(-14).rounded(6))
+        // A table row draws its piece of the table's frame, and its stripe under
+        // any tint, so the cursor layer still shows on it.
+        .when(Boolean(tr), el => el.overflow_hidden().border_x(1).border_t(1).border_color(t.border)
+          .when(tr.first, el => el.rounded_t(8)).when(tr.last, el => el.rounded_b(8).border_b(1))
+          .when(tr.r < 0, el => el.bg(t.surface)).when(tr.r % 2 === 1, el => el.bg(t.canvas)))
         .when(cur, el => el.on_size_change((size, cx) => {
           const w = size.width, h = size.height, c = this.curSize;   // zoomed px, as .loop wants
           if (c?.i !== i || c.w !== w || c.h !== h) { this.curSize = { i, w, h }; cx.notify(); }
@@ -921,7 +946,7 @@ export default class Md extends View {
         .when(!m && hit, el => el.bg(t.accent + (current ? "2e" : "12")))
         // The cursor: a layer behind the block, so it can pulse or blink without
         // fading the text.
-        .when(cur && !sel && Boolean(cp.row), el => el.child(animate(div().id(`cur-${i}`).absolute().top(0).left(0).when(!grows, el => el.bottom(0).right(0)).rounded(6)
+        .when(cur && !sel && Boolean(cp.row), el => el.child(animate(div().id(`cur-${i}`).absolute().top(0).left(0).when(!grows, el => el.bottom(0).right(0)).rounded(tr ? 0 : 6)
           .when(cp.row === "lift", el => el.bg(t.raised).shadow_md()).when(cp.row !== "lift", el => el.bg(t.hover)), cp.rowAnim, size)))
         .child(this.block(tok, i, t)))
       .when(Boolean(m?.note) && m?.last, el => el.child(
@@ -1239,7 +1264,7 @@ export default class Md extends View {
           const all = blocks(src.text, marked.lexer(src.text)).filter(b => !labelOf(b));
           pv.blocks = all.slice(0, PV_BLOCKS); pv.more = all.length - pv.blocks.length; pv.cut = src.cut; pv.lines = (text.match(/\n/g)?.length ?? 0) + 1;
           // The blocks' own tokens (a list item's list), each made once.
-          const top = [...new Set(pv.blocks.map(b => b.type === "listitem" ? b.list : b))];
+          const top = [...new Set(pv.blocks.map(b => b.type === "listitem" ? b.list : b.type === "trow" ? b.table : b))];
           marked.walkTokens(top, tok => { tok.pv = true; if (isMath(tok) || isMermaid(tok)) tok.fig = this.figKey(tok); });
           this.prepare(top, pv.codes);
         } catch (e) { pv.blocks = []; pv.error = `couldn't preview: ${String(e).slice(0, 100)}`; }
@@ -1515,9 +1540,20 @@ export default class Md extends View {
   range() { const a = this.anchor ?? this.cursor; return [Math.min(a, this.cursor), Math.max(a, this.cursor)]; }
 
   // Source lines and text of the current selection (or the cursor block).
+  // Rows picked out of a table keep its header and |---| line, so the text is
+  // still a table; `lines` stays the rows themselves.
   selection() {
-    const [a, b] = this.range(), from = this.blocks[a].from, to = this.blocks[b].to;
-    return { file: this.file, lines: [from, to], text: this.src.split("\n").slice(from - 1, to).join("\n") };
+    const [a, b] = this.range(), from = this.blocks[a].from, to = this.blocks[b].to, src = this.src.split("\n");
+    let text = src.slice(from - 1, to).join("\n");
+    const s = this.blocks[a];
+    if (s.type === "trow" && s.r >= 0) {
+      let h = a; while (h > 0 && this.blocks[h - 1].type === "trow" && this.blocks[h - 1].table === s.table) h--;
+      const top = this.blocks[h];
+      // The header block when it's shown; otherwise the two lines above the first row.
+      const head = top.r < 0 ? src.slice(top.from - 1, top.to) : src.slice(top.from - 3, top.from - 1);
+      if (head.length === 2) text = `${head.join("\n")}\n${text}`;
+    }
+    return { file: this.file, lines: [from, to], text };
   }
 
   // The motion's loop runs on a clock shared by every view, so a cursor that just
