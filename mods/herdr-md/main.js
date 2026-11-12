@@ -12,7 +12,7 @@ import { v_flex, h_flex, Editor, EditorState, TextView, InputState, Input } from
 import { props, readTextFile, watchFolder, exec, theme, settings, home, appHome, nextCommand, panes, focused, run, shared } from "herdr";
 import { marked, splitChunks, capSource, refDefs, lexChunk, blocks, LEX_MAX } from "./lex.js";
 import { inlineMath } from "./tex.js";
-import { followTarget, insideFolder, hash as bhash, diffBlocks, slug, labelOf, inlineRoles, alertOf, ALERTS, nextNumberMode, ordinals, gutterLabel, nextLook, nextMotion, parseCursorPref, cursorParts, LOOK_NAMES } from "./doc.js";
+import { followTarget, insideFolder, NUMBER_MODES, hash as bhash, diffBlocks, slug, labelOf, inlineRoles, alertOf, ALERTS, nextNumberMode, ordinals, gutterLabel, nextLook, nextMotion, parseCursorPref, cursorParts, LOOK_NAMES } from "./doc.js";
 import { listFiles, parseRecent, pushRecent, rank, runs, previewSource, parseConfig, layoutOf, sizeOf, within, shape, shorten } from "./picker.js";
 import { VIDEO_FPS, stopped, command, tick } from "./video.js";
 
@@ -157,6 +157,8 @@ export default class Md extends View {
     this.query = ""; this.matches = []; this.mi = 0; this.searching = false; this.typing = false;
     // Vim-ish cursor: one rendered block is one "line". anchor !== null means visual mode.
     this.cursor = 0; this.anchor = null; this.pending = ""; this.count = ""; this.numbers = "absolute"; this.look = "highlight"; this.cmotion = "blink number"; this.resting = true; this.restAt = 0; this.restGen = 0; this.picked = null; this.src = ""; this.lines = 0;
+    // props {numbers: "off" | "relative" | "absolute"}: the gutter's starting mode (# still cycles it).
+    if (NUMBER_MODES.includes(props()?.numbers)) this.numbers = props().numbers;
     this.handle = cx.focus_handle();
     this.input = InputState.new({ value: "", placeholder: "Search" });
     this.input.on("change", (_e, cx) => { this.search(this.input.value()); this.aimAt(this.matches[this.mi = 0]); cx.notify(); });

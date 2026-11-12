@@ -176,7 +176,8 @@ the file another mod names with `setShared("<key>", "/abs/path.md")`; that mod t
 `run("herdr-md.follow")` to tell it. Add `untrusted: true` for generated or third-party
 documents: local images and videos load only from inside the document's folder, and math
 and Mermaid show as source instead of installing packages and running Chrome. `font: "Charter"`
-sets the body font (default: the terminal font).
+sets the body font (default: the terminal font), and `numbers: "off"` starts without line
+numbers (`#` still cycles them).
 
 ## For agents: `mdh`
 
