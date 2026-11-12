@@ -853,7 +853,12 @@ export default class Md extends View {
             .child(div().child(tok.lang || "text"))
             .child(div().id(`${id}-copy`).px(8).rounded(4).cursor_pointer().hover(s => s.bg(t.hover).text_color(t.foreground))
               .on_click(() => exec("sh", ["-c", 'printf %s "$1" | LANG=en_US.UTF-8 pbcopy', "copy", tok.text])).child("copy")))
-          .child(div().h(Math.min(lines, 40) * 20 + 4).child(Editor.new(tok.state).size_full()));
+          .child(div().relative().h(Math.min(lines, 40) * 20 + 4).child(Editor.new(tok.state).size_full())
+            // The editor scrolls past its last line, so a block that fits would scroll into blank lines
+            // and catch the wheel: over one that fits, the wheel scrolls the document. Clicks still reach
+            // the code (this layer has no mouse handlers). A longer block keeps its own scrolling.
+            .when(lines <= 40, el => el.child(div().id(`${id}-wheel`).absolute().top(0).left(0).size_full()
+              .on_scroll_wheel((e, cx) => { cx.stop_propagation(); if (!this.zoom) this.scrollBy(-e.delta.y / Z(), cx); }))));
       }
       case "blockquote": {
         const al = alertOf(tok);
