@@ -121,3 +121,22 @@ export function cursorParts(look, motion, numbersOn) {
   const m = MOTIONS[motion] ?? {};
   return { row, badge, numAnim: numbersOn ? m.num ?? null : null, rowAnim: row ? m.row ?? null : null };
 }
+
+// Following another mod's pick: a viewer with props {follow: key} shows the file
+// another mod names with setShared(key, path), told by `herdr-app do herdr-md.follow`
+// (or run("herdr-md.follow")). Returns {open: path}, {clear: true} or null (no change).
+// Only an absolute markdown path is followed; anything else empties the viewer.
+export function followTarget(current, wanted) {
+  const ok = typeof wanted === "string" && wanted.startsWith("/") && /\.(md|markdown|mdx)$/i.test(wanted);
+  if (!ok) return current ? { clear: true } : null;
+  return wanted === current ? null : { open: wanted };
+}
+
+// An untrusted document (props {untrusted: true}, e.g. a generated review of someone
+// else's code) may only show local images inside its own folder: otherwise any readable
+// file it names would be copied into the cache. `..` and `.` are resolved first.
+export function insideFolder(abs, dir) {
+  const norm = p => p.split("/").reduce((out, part) => part === ".." ? out.slice(0, -1) : part && part !== "." ? [...out, part] : out, []).join("/");
+  const a = norm(abs), d = norm(dir);
+  return a.startsWith(d + "/");
+}

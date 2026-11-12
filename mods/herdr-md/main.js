@@ -9,10 +9,10 @@
 // them and scrolls to `focus` whenever `seq` changes.
 import { View, div, image } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, TextView, InputState, Input } from "gpui-base";
-import { props, readTextFile, watchFolder, exec, theme, settings, home, appHome, nextCommand, panes, focused, run } from "herdr";
+import { props, readTextFile, watchFolder, exec, theme, settings, home, appHome, nextCommand, panes, focused, run, shared } from "herdr";
 import { marked, splitChunks, capSource, refDefs, lexChunk, blocks, LEX_MAX } from "./lex.js";
 import { inlineMath } from "./tex.js";
-import { hash as bhash, diffBlocks, slug, labelOf, inlineRoles, alertOf, ALERTS, nextNumberMode, ordinals, gutterLabel, nextLook, nextMotion, parseCursorPref, cursorParts, LOOK_NAMES } from "./doc.js";
+import { followTarget, insideFolder, hash as bhash, diffBlocks, slug, labelOf, inlineRoles, alertOf, ALERTS, nextNumberMode, ordinals, gutterLabel, nextLook, nextMotion, parseCursorPref, cursorParts, LOOK_NAMES } from "./doc.js";
 import { listFiles, parseRecent, pushRecent, rank, runs, previewSource, parseConfig, layoutOf, sizeOf, within, shape, shorten } from "./picker.js";
 import { VIDEO_FPS, stopped, command, tick } from "./video.js";
 
@@ -140,7 +140,11 @@ const squash = s => s.replace(/\s+/g, " ").trim().toLowerCase();
 
 export default class Md extends View {
   init(_props, cx) {
-    this.file = props()?.file ?? null;
+    // props {follow: key}: show the file another mod names under that shared key (see followTarget).
+    this.followKey = props()?.follow ?? null;
+    // props {untrusted: true}: no local images outside the document's folder, no figure rendering (npm, node, Chrome).
+    this.untrusted = props()?.untrusted === true;
+    this.file = this.followKey ? followTarget(null, shared(this.followKey))?.open ?? null : props()?.file ?? null;
     this.blocks = []; this.error = null; this.codes = []; this.images = {}; this.figs = {}; this.videos = {}; this.videoList = []; this.born = Date.now() * 1e6; this.videoSeq = null; this.pendingVideo = null;
     this.noteAlpha = 1; this.typed = Infinity;
     this.offset = 0; this.motion = 0; this.heights = []; this.loadGen = 0; this.shown = null; this.viewH = 0; this.contentH = 0; this.colW = MAX_W - PAD * 2;
@@ -192,6 +196,14 @@ export default class Md extends View {
     cx.spawn(async cx => {
       for (;;) {
         const c = await nextCommand();
+        // `herdr-md.follow`: the mod this viewer follows picked another file (or none).
+        if (c === "follow") {
+          if (!this.followKey) continue;
+          const next = followTarget(this.file, shared(this.followKey));
+          if (next?.open) this.navigate(next.open, null, cx, false);
+          else if (next?.clear) this.clearFile(cx);
+          continue;
+        }
         // `mdh pick` (herdr-app do herdr-md.pick): the focused viewer opens its
         // picker; with no viewer focused, the only viewer does (and takes focus).
         if (c === "pick") {
@@ -381,6 +393,13 @@ export default class Md extends View {
     this.load(cx); this.watch(cx); this.readNotes(cx);
   }
 
+  // Empty the viewer (a followed mod picked nothing): stop loading and watching the old file.
+  clearFile(cx) {
+    this.file = null; this.blocks = []; this.error = null; this.loadGen++; this.watchGen++;
+    this.offset = 0; this.motion = 0; this.cursor = 0; this.anchor = null; this.history = [];
+    cx.notify();
+  }
+
   back(cx) {
     const h = this.history.pop(); if (!h) return;
     if (h.file === this.file) { this.cursor = h.cursor; this.aimAt(h.cursor); return cx.notify(); }
@@ -538,6 +557,7 @@ export default class Md extends View {
     for (const href of [...new Set(srcs)]) {
       if (/^[a-z]+:\/\//i.test(href)) { this.images[href] = { remote: true }; continue; }
       const abs = href.startsWith("/") ? href : `${dirname(this.file)}/${decodeURIComponent(href)}`;
+      if (this.untrusted && !insideFolder(abs, dirname(this.file))) { this.images[href] = { missing: true }; continue; }
       const ext = (abs.split(".").pop() || "png").toLowerCase();
       const name = abs.replace(/[^a-zA-Z0-9]+/g, "_").slice(-120) + "." + ext;
       const cp = await exec("cp", ["-p", abs, `${appHome()}/${CACHE}/${name}`]);
@@ -567,6 +587,7 @@ export default class Md extends View {
       const v = this.videos[href] ??= {};
       if (/^[a-z][a-z0-9+.-]*:/i.test(href)) { v.remote = true; continue; }
       v.abs = href.startsWith("/") ? href : `${dirname(this.file)}/${decodeURIComponent(href)}`;
+      if (this.untrusted && !insideFolder(v.abs, dirname(this.file))) { v.missing = true; continue; }
       const st = await exec("stat", ["-f", "%m:%z", v.abs]);
       if (st.code !== 0) { v.missing = true; continue; }
       const key = fnv(v.abs + st.stdout.trim()), dir = `${CACHE}/v/${key}`;
@@ -698,6 +719,11 @@ export default class Md extends View {
   // batch (one Chrome launch for all diagrams). A figure keeps showing its old
   // image (the last theme's) until the new one is ready, so nothing jumps.
   async renderFigures(tokens) {
+    if (this.untrusted) {
+      // Shown as source: rendering would install packages and run Chrome on the document's content.
+      marked.walkTokens(tokens, tok => { if (isMath(tok) || isMermaid(tok)) { tok.fig = this.figKey(tok); this.figs[tok.fig] = { error: "not rendered for an untrusted document" }; } });
+      return;
+    }
     const t = theme(), font = settings().font_family || "sans-serif", jobs = [], waiting = [];
     const root = `${appHome()}/${FIG}`;
     marked.walkTokens(tokens, tok => {
@@ -1727,6 +1753,8 @@ export default class Md extends View {
 
   // No file yet (an empty viewer, or Esc in its picker): one calm line pointing at ctrl-p.
   emptyState(t) {
+    if (this.followKey) return v_flex().id("md-empty").absolute().top(0).left(0).size_full().items_center().justify_center().font_family(BODY())
+      .text_size(SIZE.body).text_color(t.muted).child(props()?.empty ?? "Nothing to show");
     const chip = k => div().px(6).rounded(4).bg(t.surface).border_1().border_color(t.border).text_size(12).text_color(t.muted).child(k);
     return v_flex().id("md-empty").absolute().top(0).left(0).size_full().items_center().justify_center().gap(10).font_family(BODY())
       .child(h_flex().gap(10).items_center().text_size(SIZE.body).text_color(t.muted)
