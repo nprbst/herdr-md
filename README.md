@@ -175,7 +175,8 @@ A viewer placed in a layout with `props: {follow: "<key>", empty: "Nothing picke
 the file another mod names with `setShared("<key>", "/abs/path.md")`; that mod then runs
 `run("herdr-md.follow")` to tell it. Add `untrusted: true` for generated or third-party
 documents: local images and videos load only from inside the document's folder, and math
-and Mermaid show as source instead of installing packages and running Chrome.
+and Mermaid show as source instead of installing packages and running Chrome. `font: "Charter"`
+sets the body font (default: the terminal font).
 
 ## For agents: `mdh`
 

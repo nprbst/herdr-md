@@ -25,7 +25,8 @@ const isMermaid = tok => tok.type === "code" && /^mermaid\b/i.test(tok.lang || "
 const isMath = tok => tok.type === "math" || (tok.type === "code" && /^(math|latex|tex)$/i.test(tok.lang || ""));
 
 // Body text in the person's terminal font (BerkeleyMono), falling back to Geist.
-const BODY = () => settings().font_family || "Geist";
+// Body text: props {font} when a layout sets one (e.g. a serif for long prose), else the terminal font, else Geist.
+const BODY = () => props()?.font || settings().font_family || "Geist";
 const SIZE = { body: 15, h1: 34, h2: 26, h3: 21, h4: 18, h5: 16, h6: 15 };
 const MAX_W = 960, PAD = 64, TOP = 28;
 // Scroll animation, done natively by GPUI's transition on the content's `top`:
